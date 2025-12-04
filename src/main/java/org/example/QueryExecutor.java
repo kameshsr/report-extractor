@@ -8,9 +8,9 @@ import java.util.List;
 public class QueryExecutor {
 
     // Database connection details (change as per your setup)
-    private static final String DB_URL = "jdbc:postgresql://qajava21.mosip.net:5433/mosip_regprc";
-    private static final String DB_USER = "readuser";
-    private static final String DB_PASS = "readuser";
+    private static final String DB_URL = "jdbc:postgresql://dev.mosip.net:5433/mosip_regprc";
+    private static final String DB_USER = "postgres";
+    private static final String DB_PASS = "hV%8X*DiR$502*oj";
 
     public static void main(String[] args) {
         String inputFile = "output.txt";          // contains extracted reg_id/api
