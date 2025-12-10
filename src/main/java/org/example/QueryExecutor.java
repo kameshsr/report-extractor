@@ -50,6 +50,7 @@ public class QueryExecutor {
     private static final int MAX_COMMENT_LEN = 400;
 
     public static void main(String[] args) {
+        query();
         String inputFile = args.length > 0 ? args[0] : "output.txt";
         String perRegOutputFile = args.length > 1 ? args[1] : "query_results.txt";
         String categoriesFile = args.length > 2 ? args[2] : "categories.txt";
@@ -298,6 +299,53 @@ public class QueryExecutor {
             this.trnType = trnType;
             this.statusCode = statusCode;
             this.statusComment = statusComment;
+        }
+    }
+
+    public static void query() {
+        // Input file and output file
+//        String inputFile = "";
+        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\b.html"; // Corrected path
+        String outputFile = "output.txt";   // output file
+
+        // Regex: capture value after /status/ ... until ) 
+        String urlPattern = "End Point URL: http://packetcreator\\.packetcreator:80/v1/packetcreator/resident/status/([\\w\\-]+/api-internal\\.devupgrade.mosip.net_S\\d+_context)\\)";
+
+        Pattern pattern = Pattern.compile(urlPattern);
+
+        try {
+            java.util.List<String> lines = Files.readAllLines(Paths.get(inputFile));
+            boolean found = false;
+
+            for (String line : lines) {
+                // We only care about lines that contain "Failed at Packet Processing"
+                if (line.contains("Failed at Packet Processing")) {
+                    Matcher matcher = pattern.matcher(line);
+
+                    if (matcher.find()) {
+                        String extractedValue = matcher.group(1);
+
+                        // Write to output.txt
+                        Path outputPath = Paths.get(outputFile).toAbsolutePath();
+                        try (BufferedWriter writer = Files.newBufferedWriter(outputPath,
+                                StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                            writer.write(extractedValue);
+                            writer.newLine();
+                        }
+
+                        System.out.println("Extracted: " + extractedValue);
+                        System.out.println("Output written to: " + outputPath);
+                        found = true;
+                    }
+                }
+            }
+
+            if (!found) {
+                System.out.println("No matching pattern found.");
+            }
+
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 }
