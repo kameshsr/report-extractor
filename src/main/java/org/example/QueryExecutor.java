@@ -49,6 +49,36 @@ public class QueryExecutor {
 
     private static final int MAX_COMMENT_LEN = 400;
 
+    private static String computeDurationLabel(Timestamp start, Timestamp end) {
+        if (start == null || end == null) return "0min_0sec";
+
+        long ms = end.getTime() - start.getTime();
+        if (ms < 0) ms = 0;
+
+        long seconds = ms / 1000;
+        long minutes = seconds / 60;
+        long remSeconds = seconds % 60;
+
+        return minutes + "min_" + remSeconds + "sec";
+    }
+    private static String getTimeTakenForRegId(Connection conn, String regId) throws SQLException {
+        String sql = "SELECT MIN(cr_dtimes) AS start_time, MAX(upd_dtimes) AS end_time " +
+                "FROM regprc.registration_transaction WHERE reg_id = ?";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, regId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    Timestamp start = rs.getTimestamp("start_time");
+                    Timestamp end = rs.getTimestamp("end_time");
+                    return computeDurationLabel(start, end);
+                }
+            }
+        }
+        return "0min_0sec";
+    }
+
+
     public static void main(String[] args) {
         query();
         String inputFile = args.length > 0 ? args[0] : "output.txt";
@@ -98,7 +128,13 @@ public class QueryExecutor {
 
                     // Extract S-number (if any) from the original line and form regWithS
                     String sNum = extractSNumber(originalLine);
-                    String regWithS = sNum.isEmpty() ? regId : regId + "_" + sNum;
+                    String timeTakenLabel = getTimeTakenForRegId(conn, regId);  // NEW LINE
+
+                    String regWithS = regId;
+                    if (!sNum.isEmpty()) regWithS += "_" + sNum;
+
+                    regWithS += "_" + timeTakenLabel;  // append timing
+
 
                     List<RowData> rows = new ArrayList<>();
                     stmt.setString(1, regId); // query uses pure regId (without S-number)
