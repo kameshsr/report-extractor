@@ -79,7 +79,7 @@ public class QueryExecutor {
     }
 
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         query();
         String inputFile = args.length > 0 ? args[0] : "output.txt";
         String perRegOutputFile = args.length > 1 ? args[1] : "query_results.txt";
@@ -338,11 +338,15 @@ public class QueryExecutor {
         }
     }
 
-    public static void query() {
+    public static void query() throws IOException {
         // Input file and output file
 //        String inputFile = "";
-        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\b.html"; // Corrected path
+        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\c.html"; // Corrected path
         String outputFile = "output.txt";   // output file
+        
+//        String html = Files.readString(Path.of(inputFile));
+//        HtmlSplitter.extractBeforeKeywordAndSave(inputFile, "Known Issues", Path.of(inputFile));
+
 
         // Regex: capture value after /status/ ... until ) 
         String urlPattern = "End Point URL: http://packetcreator\\.packetcreator:80/v1/packetcreator/resident/status/([\\w\\-]+/api-internal\\.devupgrade.mosip.net_S\\d+_context)\\)";
