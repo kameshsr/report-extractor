@@ -9,11 +9,11 @@ public class PacketExtractor {
     public static void main(String[] args) {
         // Input file and output file
 //        String inputFile = "";
-        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\b.html"; // Corrected path
+        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\automation_report\\DSL-api-internal.cellbox21-full-run-1768762939898-report_T-209_P-60_KI-18_I-12_S-36_F-83.html"; // Corrected path
         String outputFile = "output.txt";   // output file
 
         // Regex: capture value after /status/ ... until ) 
-        String urlPattern = "End Point URL: http://packetcreator\\.packetcreator:80/v1/packetcreator/resident/status/([\\w\\-]+/api-internal\\.devupgrade.mosip.net_S\\d+_context)\\)";
+        String urlPattern = "End Point URL: http://packetcreator\\.packetcreator:80/v1/packetcreator/resident/status/([\\w\\-]+/api-internal\\.cellbox21_S\\d+_context)\\)";
 
         Pattern pattern = Pattern.compile(urlPattern);
 
