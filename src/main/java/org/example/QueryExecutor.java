@@ -29,9 +29,9 @@ import java.util.regex.Matcher;
 public class QueryExecutor {
 
     // ----------------- Edit DB details here if needed -----------------
-    private static final String DB_URL = "jdbc:postgresql://172.31.9.158:5432/mosip_regprc";
+    private static final String DB_URL = "jdbc:postgresql://qa11.mosip.net:5433/mosip_regprc";
     private static final String DB_USER = "postgres";
-    private static final String DB_PASS = "797mKZO1Bo";
+    private static final String DB_PASS = "7x0*a!F1I6c!eSD$";
     // ------------------------------------------------------------------
 
     // Normalization patterns
@@ -341,11 +341,11 @@ public class QueryExecutor {
     public static void query() {
         // Input file and output file
 //        String inputFile = "";
-        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\automation_report\\DSL-api-internal.cellbox21-full-run-1768330944801-report_T-209_P-107_KI-18_I-12_S-0_F-72.html"; // Corrected path
+        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\automation_report\\DSL-api-internal.qa11-full-run-1769652130183-report_T-204_P-137_KI-27_I-12_S-0_F-28.html"; // Corrected path
         String outputFile = "output.txt";   // output file
 
         // Regex: capture value after /status/ ... until ) 
-        String urlPattern = "End Point URL: http://packetcreator\\.packetcreator:80/v1/packetcreator/resident/status/([\\w\\-]+/api-internal\\.cellbox21_S\\d+_context)\\)";
+        String urlPattern = "End Point URL: http://packetcreator\\.packetcreator:80/v1/packetcreator/resident/status/([\\w\\-]+/api-internal\\.qa11_S\\d+_context)\\)";
 
         Pattern pattern = Pattern.compile(urlPattern);
 
