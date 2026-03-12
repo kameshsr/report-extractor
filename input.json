@@ -1,0 +1,298 @@
+{
+  "id": "mosip.registration.transaction",
+  "version": "1.0",
+  "responsetime": "2026-03-12T10:04:06.892Z",
+  "response": [
+    {
+      "id": "c4d59f5c-0269-4744-b3f8-c8b702f85c57",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "SECUREZONE_NOTIFICATION",
+      "parentTransactionId": "620355e7-2e4a-4e3b-86d7-ae1d980d6d24",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-SEN-SUCCESS-001",
+      "statusComment": "Notification received to securezone",
+      "createdDateTimes": "2026-03-12T03:43:37.408Z"
+    },
+    {
+      "id": "36280f14-6ff8-49ec-b0fc-c42f230989b6",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "QUALITY_CLASSIFIER",
+      "parentTransactionId": "a28a11d6-cb8a-4273-b98e-ca41f54700be",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-QCK-SUCCESS-002",
+      "statusComment": "Biometric Quality Check is Successful",
+      "createdDateTimes": "2026-03-12T03:43:53.194Z"
+    },
+    {
+      "id": "d66695c3-8ca6-4524-bfc9-085a46534174",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "UPLOAD_PACKET",
+      "parentTransactionId": "c4d59f5c-0269-4744-b3f8-c8b702f85c57",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKU-SUCCESS-001",
+      "statusComment": "Packet is Uploaded to Packet Store",
+      "createdDateTimes": "2026-03-12T03:43:39.976Z"
+    },
+    {
+      "id": "e2ed9a7c-c1c7-482d-8a61-25c52400d60c",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "PACKET_CLASSIFICATION",
+      "parentTransactionId": "4d81c9f5-68ca-415e-a887-3e7d5f55798a",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKCSUCCESS-001",
+      "statusComment": "Packet Classification is Successful",
+      "createdDateTimes": "2026-03-12T03:43:51.540Z"
+    },
+    {
+      "id": "b2ea93b0-e477-430c-b619-4b13475198b9",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "PACKET_RECEIVER",
+      "parentTransactionId": null,
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKR-SUCCESS-001",
+      "statusComment": "Packet has reached Packet Receiver",
+      "createdDateTimes": "2026-03-12T03:43:36.848Z"
+    },
+    {
+      "id": "620355e7-2e4a-4e3b-86d7-ae1d980d6d24",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "PACKET_RECEIVER",
+      "parentTransactionId": "b2ea93b0-e477-430c-b619-4b13475198b9",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKR-SUCCESS-002",
+      "statusComment": "Packet is Uploaded to Landing Zone",
+      "createdDateTimes": "2026-03-12T03:43:37.286Z"
+    },
+    {
+      "id": "4d81c9f5-68ca-415e-a887-3e7d5f55798a",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "VALIDATE_PACKET",
+      "parentTransactionId": "d66695c3-8ca6-4524-bfc9-085a46534174",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKV-SUCCESS-001",
+      "statusComment": "Packet Validation is Successful",
+      "createdDateTimes": "2026-03-12T03:43:51.059Z"
+    },
+    {
+      "id": "f903b718-492b-4fc0-83de-9589d98381c5",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "CMD_VALIDATION",
+      "parentTransactionId": "e2ed9a7c-c1c7-482d-8a61-25c52400d60c",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-CMD-SUCCESS-001",
+      "statusComment": "CMD Validation is Successful",
+      "createdDateTimes": "2026-03-12T03:43:52.328Z"
+    },
+    {
+      "id": "dd9e39c2-7d03-4a99-a2fe-5767b4a38b88",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "OPERATOR_VALIDATION",
+      "parentTransactionId": "f903b718-492b-4fc0-83de-9589d98381c5",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-OVM-SUCCESS-001",
+      "statusComment": "OPERATOR Validation is Successful",
+      "createdDateTimes": "2026-03-12T03:43:52.455Z"
+    },
+    {
+      "id": "a28a11d6-cb8a-4273-b98e-ca41f54700be",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "SUPERVISOR_VALIDATION",
+      "parentTransactionId": "dd9e39c2-7d03-4a99-a2fe-5767b4a38b88",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-SVM-SUCCESS-001",
+      "statusComment": "SUPERVISOR Validation is Successful",
+      "createdDateTimes": "2026-03-12T03:43:52.624Z"
+    },
+    {
+      "id": "e534cbac-fe0b-4985-b8ae-6aeb220a3320",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "DEMOGRAPHIC_VERIFICATION",
+      "parentTransactionId": "36280f14-6ff8-49ec-b0fc-c42f230989b6",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-DDP-SUCCESS-001",
+      "statusComment": "Demo Dedupe is Successful",
+      "createdDateTimes": "2026-03-12T03:43:53.770Z"
+    },
+    {
+      "id": "269f70e0-9b5e-4533-9223-577354acbbb2",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "BIOGRAPHIC_VERIFICATION",
+      "parentTransactionId": "e534cbac-fe0b-4985-b8ae-6aeb220a3320",
+      "statusCode": "IN_PROGRESS",
+      "subStatusCode": "RPR-BDP-SUCCESS-001",
+      "statusComment": "Biometric Deduplication In-Progress",
+      "createdDateTimes": "2026-03-12T03:43:54.280Z"
+    },
+    {
+      "id": "25087313-164d-401d-8991-b4c3f8472077",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "BIOGRAPHIC_VERIFICATION",
+      "parentTransactionId": "f9bbd6c2-8c18-405f-a2fe-e7fd5e45617c",
+      "statusCode": "IN_PROGRESS",
+      "subStatusCode": "RPR-BDP-SUCCESS-001",
+      "statusComment": "Biometric Deduplication In-Progress",
+      "createdDateTimes": "2026-03-12T04:00:09.300Z"
+    },
+    {
+      "id": "f9bbd6c2-8c18-405f-a2fe-e7fd5e45617c",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "DEMOGRAPHIC_VERIFICATION",
+      "parentTransactionId": "5e987a2f-fc84-40b3-a3fa-6b9c583638b2",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-DDP-SUCCESS-001",
+      "statusComment": "Demo Dedupe is Successful",
+      "createdDateTimes": "2026-03-12T04:00:08.902Z"
+    },
+    {
+      "id": "8c77372d-ed1c-405a-bbb4-430035767c3e",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "SECUREZONE_NOTIFICATION",
+      "parentTransactionId": "a9aae4ca-7d7c-45d0-9d9d-9984c7f555af",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-SEN-SUCCESS-001",
+      "statusComment": "Notification received to securezone",
+      "createdDateTimes": "2026-03-12T04:00:00.197Z"
+    },
+    {
+      "id": "5e987a2f-fc84-40b3-a3fa-6b9c583638b2",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "QUALITY_CLASSIFIER",
+      "parentTransactionId": "fb7d4800-9100-4329-bff6-cc5140b21f4a",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-QCK-SUCCESS-002",
+      "statusComment": "Biometric Quality Check is Successful",
+      "createdDateTimes": "2026-03-12T04:00:08.459Z"
+    },
+    {
+      "id": "3c52a2f1-e479-4786-8237-d90ca931a1a1",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "PACKET_CLASSIFICATION",
+      "parentTransactionId": "847c557b-9c28-4f73-a6e9-950480356a79",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKCSUCCESS-001",
+      "statusComment": "Packet Classification is Successful",
+      "createdDateTimes": "2026-03-12T04:00:06.792Z"
+    },
+    {
+      "id": "847c557b-9c28-4f73-a6e9-950480356a79",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "VALIDATE_PACKET",
+      "parentTransactionId": "3451707e-71c2-48ec-96ff-eb9150e227f8",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKV-SUCCESS-001",
+      "statusComment": "Packet Validation is Successful",
+      "createdDateTimes": "2026-03-12T04:00:06.430Z"
+    },
+    {
+      "id": "1ced6439-c33e-48e3-aa74-019932b05680",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "CMD_VALIDATION",
+      "parentTransactionId": "3c52a2f1-e479-4786-8237-d90ca931a1a1",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-CMD-SUCCESS-001",
+      "statusComment": "CMD Validation is Successful",
+      "createdDateTimes": "2026-03-12T04:00:07.657Z"
+    },
+    {
+      "id": "9c8e03e0-b28d-4feb-9cfc-34087dd13238",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "OPERATOR_VALIDATION",
+      "parentTransactionId": "1ced6439-c33e-48e3-aa74-019932b05680",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-OVM-SUCCESS-001",
+      "statusComment": "OPERATOR Validation is Successful",
+      "createdDateTimes": "2026-03-12T04:00:07.833Z"
+    },
+    {
+      "id": "fb7d4800-9100-4329-bff6-cc5140b21f4a",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "SUPERVISOR_VALIDATION",
+      "parentTransactionId": "9c8e03e0-b28d-4feb-9cfc-34087dd13238",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-SVM-SUCCESS-001",
+      "statusComment": "SUPERVISOR Validation is Successful",
+      "createdDateTimes": "2026-03-12T04:00:08.011Z"
+    },
+    {
+      "id": "6f924246-3cac-4bc7-ac6c-50fb0bc8b227",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "UIN_GENERATOR",
+      "parentTransactionId": "3103587e-f9c0-48f9-b454-8c03221db5e2",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-UIN-SUCCESS-001",
+      "statusComment": "UIN Generated Successfully",
+      "createdDateTimes": "2026-03-12T04:00:13.898Z"
+    },
+    {
+      "id": "a9aae4ca-7d7c-45d0-9d9d-9984c7f555af",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "PACKET_REPROCESS",
+      "parentTransactionId": "269f70e0-9b5e-4533-9223-577354acbbb2",
+      "statusCode": "REPROCESS",
+      "subStatusCode": "RPR-RPS-SUCCESS-002",
+      "statusComment": "Reprocess restart from stage Completed",
+      "createdDateTimes": "2026-03-12T04:00:00.121Z"
+    },
+    {
+      "id": "3451707e-71c2-48ec-96ff-eb9150e227f8",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "UPLOAD_PACKET",
+      "parentTransactionId": "8c77372d-ed1c-405a-bbb4-430035767c3e",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-PKU-SUCCESS-001",
+      "statusComment": "Packet is Uploaded to Packet Store",
+      "createdDateTimes": "2026-03-12T04:00:01.942Z"
+    },
+    {
+      "id": "551d5dff-44d1-41e6-8259-26f2fe71228c",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "INTERNAL_WORKFLOW_ACTION",
+      "parentTransactionId": "3e47ce11-4d0b-43b1-bee9-fb8a40bc66fb",
+      "statusCode": "PROCESSED",
+      "subStatusCode": "RPR-WIA-001",
+      "statusComment": "Packet processing completed with action code : COMPLETE_AS_PROCESSED",
+      "createdDateTimes": "2026-03-12T04:00:18.254Z"
+    },
+    {
+      "id": "3103587e-f9c0-48f9-b454-8c03221db5e2",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "BIOGRAPHIC_VERIFICATION",
+      "parentTransactionId": "25087313-164d-401d-8991-b4c3f8472077",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-BDP-SUCCESS-002",
+      "statusComment": "Biometric Deduplication is Successful",
+      "createdDateTimes": "2026-03-12T04:00:11.270Z"
+    },
+    {
+      "id": "c7a48313-90a3-4632-8301-df7d2d18a5a3",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "BIOMETRIC_EXTRACTION",
+      "parentTransactionId": "6f924246-3cac-4bc7-ac6c-50fb0bc8b227",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-BEN-SUCCESS-001",
+      "statusComment": "biometric extaction was successful",
+      "createdDateTimes": "2026-03-12T04:00:16.126Z"
+    },
+    {
+      "id": "b2f7a1eb-970a-4bdf-86f4-3cdc812e2b9c",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "FINALIZATION",
+      "parentTransactionId": "c7a48313-90a3-4632-8301-df7d2d18a5a3",
+      "statusCode": "SUCCESS",
+      "subStatusCode": "RPR-FIN-SUCCESS-001",
+      "statusComment": "idrepo draft was published  successfuly",
+      "createdDateTimes": "2026-03-12T04:00:17.523Z"
+    },
+    {
+      "id": "3e47ce11-4d0b-43b1-bee9-fb8a40bc66fb",
+      "registrationId": "10075100601083520260312034335",
+      "transactionTypeCode": "PRINT_SERVICE",
+      "parentTransactionId": "b2f7a1eb-970a-4bdf-86f4-3cdc812e2b9c",
+      "statusCode": "PROCESSED",
+      "subStatusCode": "RPR-PPS-SUCCESS-001",
+      "statusComment": "Print request submitted",
+      "createdDateTimes": "2026-03-12T04:00:17.994Z"
+    }
+  ],
+  "errors": null
+}
