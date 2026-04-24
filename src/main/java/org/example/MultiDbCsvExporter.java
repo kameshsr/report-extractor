@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.sql.*;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -54,9 +55,10 @@ public class MultiDbCsvExporter {
     };
 
     // -----------------------------------------------------------------------
-    // TIME RANGE — START_TIME is fixed; endTime is fetched at runtime from DB1
+    // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String START_TIME = "2026-04-23 18:20:00.000";
+    private static final String UPLOAD_START_TIME = "2026-04-23 10:25:00.000"; // upload/cr_dtimes filter
+    private static final String START_TIME        = "2026-04-23 18:20:00.000"; // processing start
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -272,6 +274,7 @@ public class MultiDbCsvExporter {
             return;
         }
 
+        //String endTime = "2026-04-23 19:20:00.000";
         String endTime = fetchEndTime();
         if (endTime == null) {
             System.err.println("Could not determine END_TIME from DB1 — aborting.");
@@ -279,6 +282,20 @@ public class MultiDbCsvExporter {
         }
         System.out.println("END_TIME (from DB1): " + endTime);
         QUERIES = buildQueries(endTime);
+
+        // Fetch registration status counts (summary header block)
+        List<String[]> statusCounts = fetchRegistrationStatusCounts(UPLOAD_START_TIME);
+
+        // Duration = endTime − START_TIME (processing start)
+        String durationStr;
+        try {
+            LocalDateTime endDT   = Timestamp.valueOf(endTime).toLocalDateTime();
+            LocalDateTime startDT = Timestamp.valueOf(START_TIME).toLocalDateTime();
+            Duration dur = Duration.between(startDT, endDT);
+            durationStr = dur.toHours() + "h " + dur.toMinutesPart() + "m " + dur.toSecondsPart() + "s";
+        } catch (Exception e) {
+            durationStr = "N/A";
+        }
 
         if (DB_CONFIGS.length != QUERIES.length) {
             System.err.println("DB_CONFIGS and QUERIES arrays must have the same length.");
@@ -342,6 +359,45 @@ public class MultiDbCsvExporter {
                 StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING)) {
 
+            // --- Summary block at the top ---
+            // Row 1: labels in one row
+            writer.write(escapeCsv("Upload Start Time") + "," +
+                         escapeCsv("Processing Start Time") + "," +
+                         escapeCsv("End Time") + "," +
+                         escapeCsv("Duration (End - Processing Start)"));
+            writer.newLine();
+            // Row 2: values in one row
+            writer.write(escapeCsv(UPLOAD_START_TIME) + "," +
+                         escapeCsv(START_TIME) + "," +
+                         escapeCsv(endTime) + "," +
+                         escapeCsv(durationStr));
+            writer.newLine();
+            // Row 3: blank
+            writer.newLine();
+
+            // Row 4: registration status_codes as column headers + TOTAL
+            long totalStatusCount = 0;
+            for (String[] sc : statusCounts) {
+                try { totalStatusCount += Long.parseLong(sc[1]); } catch (NumberFormatException ignored) {}
+            }
+            StringBuilder statusHeaders = new StringBuilder();
+            for (int s = 0; s < statusCounts.size(); s++) {
+                if (s > 0) statusHeaders.append(",");
+                statusHeaders.append(escapeCsv(statusCounts.get(s)[0]));
+            }
+            statusHeaders.append(",").append(escapeCsv("TOTAL"));
+            writer.write(statusHeaders.toString()); writer.newLine();
+            // Row 5: counts + total
+            StringBuilder statusValues = new StringBuilder();
+            for (int s = 0; s < statusCounts.size(); s++) {
+                if (s > 0) statusValues.append(",");
+                statusValues.append(escapeCsv(statusCounts.get(s)[1]));
+            }
+            statusValues.append(",").append(escapeCsv(String.valueOf(totalStatusCount)));
+            writer.write(statusValues.toString()); writer.newLine();
+            // Row 6: blank separator before main table
+            writer.newLine();
+
             // Pre-compute which 1-based columns are data columns (not interval_start or source_db).
             // Layout: col1=interval_start, then per DB: source_db | data cols...
             int totalCols = 1; // interval_start
@@ -355,7 +411,7 @@ public class MultiDbCsvExporter {
                 }
             }
 
-            // Header: interval_start | source_db | DB1 cols | source_db | DB2 cols | source_db | DB3 cols
+            // Row 7: main data header
             writer.write(escapeCsv("interval_start"));
             for (int i = 0; i < DB_CONFIGS.length; i++) {
                 writer.write(",");
@@ -367,8 +423,9 @@ public class MultiDbCsvExporter {
             }
             writer.newLine();
 
-            // Data rows — Excel data starts at row 2
-            int rowNum = 2;
+            // Data rows start at row 8 (6 fixed summary rows + 1 blank + 1 main header)
+            int firstDataRow = 8;
+            int rowNum = firstDataRow;
             for (String interval : allIntervals) {
                 writer.write(escapeCsv(interval));
                 for (int i = 0; i < DB_CONFIGS.length; i++) {
@@ -394,8 +451,7 @@ public class MultiDbCsvExporter {
             }
 
             // SUM row — one row below the last data row, summing each data column
-            int firstDataRow = 2;
-            int lastDataRow  = rowNum - 1;
+            int lastDataRow = rowNum - 1;
             writer.write(escapeCsv("TOTAL"));
             for (int col = 2; col <= totalCols; col++) {
                 writer.write(",");
@@ -414,6 +470,26 @@ public class MultiDbCsvExporter {
             System.err.println("Failed to write output CSV:");
             e.printStackTrace();
         }
+    }
+
+    /** Queries DB1 for status_code counts in regprc.registration since uploadStartTime. */
+    private static List<String[]> fetchRegistrationStatusCounts(String uploadStartTime) {
+        String url = DB_CONFIGS[0][0], user = DB_CONFIGS[0][1], password = DB_CONFIGS[0][2];
+        String sql = "SELECT status_code, COUNT(*) AS status_count " +
+                     "FROM regprc.registration " +
+                     "WHERE cr_dtimes > '" + uploadStartTime + "' " +
+                     "GROUP BY status_code ORDER BY status_code";
+        List<String[]> result = new ArrayList<>();
+        try (Connection conn = DriverManager.getConnection(url, user, password);
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                result.add(new String[]{ rs.getString(1), rs.getString(2) });
+            }
+        } catch (SQLException e) {
+            System.err.println("Failed to fetch registration status counts: " + e.getMessage());
+        }
+        return result;
     }
 
     /** Queries DB1 for the latest upd_dtimes in regprc.registration to use as END_TIME. */
