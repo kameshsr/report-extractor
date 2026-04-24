@@ -24,52 +24,52 @@ import java.util.*;
  *
  * Output file: multi_db_export.csv (configurable via OUTPUT_CSV constant)
  */
-public class MultiDbCsvExporter {
+public class MultiDbCsvExporterCopy {
 
     // -----------------------------------------------------------------------
     // CONFIGURATION — edit these values to match your databases and queries
     // -----------------------------------------------------------------------
 
-    private static final String DB_HOST = "jdbc:postgresql://172.31.13.251:5432";
-    private static final String DB_USER = "postgres";
-    private static final String DB_PASS = "DB_PASS_REDACTED";
-
     /** One entry per database: {jdbcUrl, user, password, displayLabel} */
     private static final String[][] DB_CONFIGS = {
         {
-            DB_HOST + "/mosip_regprc",    // DB 1 URL
-            DB_USER, DB_PASS,
-            "DB1_regprc"                  // label shown in CSV
+            "jdbc:postgresql://172.31.13.251:5432/mosip_regprc",  // DB 1 URL
+            "postgres",                                              // DB 1 user
+            "797mKZO1Bo",                                    // DB 1 password
+            "DB1_regprc"                                            // label shown in CSV
         },
         {
-            DB_HOST + "/mosip_credential", // DB 2 URL
-            DB_USER, DB_PASS,
-            "DB2_credential"              // label shown in CSV
+            "jdbc:postgresql://172.31.13.251:5432/mosip_credential",  // DB 2 URL
+            "postgres",                                              // DB 2 user
+            "797mKZO1Bo",                                    // DB 2 password
+            "DB2_credential"                                            // label shown in CSV
         },
         {
-            DB_HOST + "/mosip_ida",       // DB 3 URL
-            DB_USER, DB_PASS,
-            "DB3_ida"                     // label shown in CSV
+            "jdbc:postgresql://172.31.13.251:5432/mosip_ida",     // DB 3 URL
+            "postgres",                                              // DB 3 user
+            "797mKZO1Bo",                                    // DB 3 password
+            "DB3_ida"                                               // label shown in CSV
         }
     };
 
     // -----------------------------------------------------------------------
-    // TIME RANGE — START_TIME is fixed; endTime is fetched at runtime from DB1
+    // TIME RANGE — edit once, applies to all 3 queries automatically
     // -----------------------------------------------------------------------
     private static final String START_TIME = "2026-04-23 18:20:00.000";
+    private static final String END_TIME   = "2026-04-23 22:50:00.000";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
-    private static String[] QUERIES;
+    private static final String[] QUERIES;
 
-    private static String[] buildQueries(String endTime) {
-        return new String[]{
+    static {
+        QUERIES = new String[]{
 
             // Query for DB 1 (mosip_regprc)
             "WITH params AS (\n" +
             "    SELECT \n" +
             "        TIMESTAMP '" + START_TIME + "' AS start_time,\n" +
-            "        TIMESTAMP '" + endTime   + "' AS end_time\n" +
+            "        TIMESTAMP '" + END_TIME   + "' AS end_time\n" +
             "),\n" +
             "\n" +
             "base AS (\n" +
@@ -150,70 +150,23 @@ public class MultiDbCsvExporter {
 
             // Query for DB 2 (mosip_credential)
             "SELECT\n" +
-            "    interval_start,\n" +
+            "    date_trunc('hour', cr_dtimes)\n" +
+            "    + INTERVAL '1 minute' * (FLOOR(EXTRACT(minute FROM cr_dtimes) / 10) * 10)\n" +
+            "    AS interval_start,\n" +
             "\n" +
-            "    COUNT(*) FILTER (WHERE stage = 'NEW')     / 2 AS new_count,\n" +
-            "    COUNT(*) FILTER (WHERE stage = 'ISSUED')  / 2 AS issued_count,\n" +
-            "    COUNT(*) FILTER (WHERE stage = 'STORED')  / 2 AS stored_count,\n" +
-            "    COUNT(*) FILTER (WHERE stage = 'FAILED')  / 2 AS failed_count\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'ERROR')    AS ERROR,\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'FAILED')   AS FAILED,\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'ISSUED')   AS ISSUED,\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'NEW')      AS NEW,\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'PRINTED')  AS PRINTED,\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'RECEIVED') AS RECEIVED,\n" +
+            "    COUNT(*) FILTER (WHERE status_code = 'STORED')   AS STORED,\n" +
+            "    COUNT(*) AS TOTAL\n" +
             "\n" +
-            "FROM (\n" +
-            "    -- NEW\n" +
-            "    SELECT\n" +
-            "        date_trunc('hour', ct.cr_dtimes)\n" +
-            "        + INTERVAL '1 minute' * (FLOOR(EXTRACT(minute FROM ct.cr_dtimes)/10)*10),\n" +
-            "        'NEW' AS stage\n" +
-            "    FROM credential.credential_transaction ct\n" +
-            "    WHERE ct.cr_dtimes BETWEEN '" + START_TIME + "' AND '" + endTime + "'\n" +
-            "      AND ct.cr_by NOT IN (\n" +
-            "          'service-account-mosip-regproc-client',\n" +
-            "          'service-account-mosip-resident-client'\n" +
-            "      )\n" +
+            "FROM credential_transaction\n" +
             "\n" +
-            "    UNION ALL\n" +
-            "\n" +
-            "    -- ISSUED\n" +
-            "    SELECT\n" +
-            "        date_trunc('hour', ct.issuancedate)\n" +
-            "        + INTERVAL '1 minute' * (FLOOR(EXTRACT(minute FROM ct.issuancedate)/10)*10),\n" +
-            "        'ISSUED'\n" +
-            "    FROM credential.credential_transaction ct\n" +
-            "    WHERE ct.issuancedate BETWEEN '" + START_TIME + "' AND '" + endTime + "'\n" +
-            "      AND ct.cr_by NOT IN (\n" +
-            "          'service-account-mosip-regproc-client',\n" +
-            "          'service-account-mosip-resident-client'\n" +
-            "      )\n" +
-            "\n" +
-            "    UNION ALL\n" +
-            "\n" +
-            "    -- STORED\n" +
-            "    SELECT\n" +
-            "        date_trunc('hour', ct.upd_dtimes)\n" +
-            "        + INTERVAL '1 minute' * (FLOOR(EXTRACT(minute FROM ct.upd_dtimes)/10)*10),\n" +
-            "        'STORED'\n" +
-            "    FROM credential.credential_transaction ct\n" +
-            "    WHERE ct.upd_dtimes BETWEEN '" + START_TIME + "' AND '" + endTime + "'\n" +
-            "      AND ct.cr_by NOT IN (\n" +
-            "          'service-account-mosip-regproc-client',\n" +
-            "          'service-account-mosip-resident-client'\n" +
-            "      )\n" +
-            "\n" +
-            "    UNION ALL\n" +
-            "\n" +
-            "    -- FAILED\n" +
-            "    SELECT\n" +
-            "        date_trunc('hour', ct.upd_dtimes)\n" +
-            "        + INTERVAL '1 minute' * (FLOOR(EXTRACT(minute FROM ct.upd_dtimes)/10)*10),\n" +
-            "        'FAILED'\n" +
-            "    FROM credential.credential_transaction ct\n" +
-            "    WHERE ct.upd_dtimes BETWEEN '" + START_TIME + "' AND '" + endTime + "'\n" +
-            "      AND ct.status_code IN ('ERROR', 'FAILED')\n" +
-            "      AND ct.cr_by NOT IN (\n" +
-            "          'service-account-mosip-regproc-client',\n" +
-            "          'service-account-mosip-resident-client'\n" +
-            "      )\n" +
-            "\n" +
-            ") t(interval_start, stage)\n" +
+            "WHERE cr_dtimes BETWEEN '" + START_TIME + "' AND '" + END_TIME + "'\n" +
+            "  AND cr_by = 'service-account-mosip-idrepo-client'\n" +
             "\n" +
             "GROUP BY interval_start\n" +
             "ORDER BY interval_start;",
@@ -228,7 +181,7 @@ public class MultiDbCsvExporter {
             "\n" +
             "FROM ida.identity_cache\n" +
             "\n" +
-            "WHERE cr_dtimes BETWEEN '" + START_TIME + "' AND '" + endTime + "'\n" +
+            "WHERE cr_dtimes BETWEEN '" + START_TIME + "' AND '" + END_TIME + "'\n" +
             "\n" +
             "GROUP BY interval_start\n" +
             "ORDER BY interval_start;"
@@ -271,14 +224,6 @@ public class MultiDbCsvExporter {
             e.printStackTrace();
             return;
         }
-
-        String endTime = fetchEndTime();
-        if (endTime == null) {
-            System.err.println("Could not determine END_TIME from DB1 — aborting.");
-            return;
-        }
-        System.out.println("END_TIME (from DB1): " + endTime);
-        QUERIES = buildQueries(endTime);
 
         if (DB_CONFIGS.length != QUERIES.length) {
             System.err.println("DB_CONFIGS and QUERIES arrays must have the same length.");
@@ -414,26 +359,6 @@ public class MultiDbCsvExporter {
             System.err.println("Failed to write output CSV:");
             e.printStackTrace();
         }
-    }
-
-    /** Queries DB1 for the latest upd_dtimes in regprc.registration to use as END_TIME. */
-    private static String fetchEndTime() {
-        String url      = DB_CONFIGS[0][0];
-        String user     = DB_CONFIGS[0][1];
-        String password = DB_CONFIGS[0][2];
-        String sql = "SELECT upd_dtimes FROM regprc.registration ORDER BY upd_dtimes DESC LIMIT 1";
-        System.out.println("Fetching END_TIME from " + DB_CONFIGS[0][3] + "...");
-        try (Connection conn = DriverManager.getConnection(url, user, password);
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-            if (rs.next()) {
-                return rs.getString(1);
-            }
-            System.err.println("END_TIME query returned no rows.");
-        } catch (SQLException e) {
-            System.err.println("Failed to fetch END_TIME: " + e.getMessage());
-        }
-        return null;
     }
 
     /** Converts a 1-based column index to an Excel column letter (1→A, 26→Z, 27→AA, …). */
