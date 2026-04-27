@@ -57,8 +57,8 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-04-23 10:25:00.000"; // upload/cr_dtimes filter
-    private static final String START_TIME        = "2026-04-23 18:20:00.000"; // processing start
+    private static final String UPLOAD_START_TIME = "2026-04-27 8:50:00.000"; // upload/cr_dtimes filter
+    private static final String START_TIME        = "2026-04-27 9:37:00.000"; // processing start
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -283,6 +283,10 @@ public class MultiDbCsvExporter {
         System.out.println("END_TIME (from DB1): " + endTime);
         QUERIES = buildQueries(endTime);
 
+        // Fetch FAILED / REPROCESS reg details for end-of-report sections
+        List<String[]> failedDetails    = fetchRegDetailsByStatus("FAILED");
+        List<String[]> reprocessDetails = fetchRegDetailsByStatus("REPROCESS");
+
         // Fetch registration status counts (summary header block)
         List<String[]> statusCounts = fetchRegistrationStatusCounts(UPLOAD_START_TIME);
 
@@ -464,6 +468,9 @@ public class MultiDbCsvExporter {
             }
             writer.newLine();
 
+            // --- Error category summary (FAILED + REPROCESS combined) ---
+            writeErrorSummary(writer, failedDetails, reprocessDetails);
+
             System.out.println("CSV export complete: " + Paths.get(outputFile).toAbsolutePath());
 
         } catch (IOException e) {
@@ -529,8 +536,112 @@ public class MultiDbCsvExporter {
      */
     private static String escapeCsv(String value) {
         if (value == null) return "\"\"";
-        // Escape existing double-quotes by doubling them
         String escaped = value.replace("\"", "\"\"");
         return "\"" + escaped + "\"";
     }
+
+    /**
+     * For a given status_code (FAILED or REPROCESS), fetches all reg_ids from
+     * regprc.registration uploaded since UPLOAD_START_TIME, then for each reg_id
+     * fetches the 2nd-latest transaction row (LIMIT 1 OFFSET 1).
+     *
+     * Returns list of String[6]:
+     *   {reg_id, reg_status_code, reg_status_comment,
+     *    trn_type_code, trn_status_code, trn_status_comment}
+     */
+    private static List<String[]> fetchRegDetailsByStatus(String statusCode) {
+        String url      = DB_CONFIGS[0][0];
+        String user     = DB_CONFIGS[0][1];
+        String password = DB_CONFIGS[0][2];
+
+        String regSql =
+            "SELECT reg_id, status_code, status_comment " +
+            "FROM regprc.registration " +
+            "WHERE status_code = ? AND cr_dtimes > '" + UPLOAD_START_TIME + "' " +
+            "ORDER BY cr_dtimes DESC";
+
+        String trnSql =
+            "SELECT trn_type_code, status_code, status_comment " +
+            "FROM regprc.registration_transaction " +
+            "WHERE reg_id = ? " +
+            "ORDER BY cr_dtimes DESC " +
+            "LIMIT 1 OFFSET 1";
+
+        List<String[]> result = new ArrayList<>();
+        System.out.printf("Fetching %s reg_ids from DB1...%n", statusCode);
+
+        try (Connection conn = DriverManager.getConnection(url, user, password);
+             PreparedStatement regPs = conn.prepareStatement(regSql);
+             PreparedStatement trnPs = conn.prepareStatement(trnSql)) {
+
+            regPs.setString(1, statusCode);
+            try (ResultSet regRs = regPs.executeQuery()) {
+                while (regRs.next()) {
+                    String regId         = regRs.getString(1);
+                    String regStatus     = regRs.getString(2);
+                    String regComment    = nvl(regRs.getString(3));
+
+                    String trnType    = "N/A";
+                    String trnStatus  = "N/A";
+                    String trnComment = "N/A";
+
+                    trnPs.setString(1, regId);
+                    try (ResultSet trnRs = trnPs.executeQuery()) {
+                        if (trnRs.next()) {
+                            trnType    = nvl(trnRs.getString(1));
+                            trnStatus  = nvl(trnRs.getString(2));
+                            trnComment = nvl(trnRs.getString(3));
+                        }
+                    }
+                    result.add(new String[]{regId, regStatus, regComment, trnType, trnStatus, trnComment});
+                }
+            }
+        } catch (SQLException e) {
+            System.err.printf("Failed to fetch %s details: %s%n", statusCode, e.getMessage());
+        }
+        System.out.printf("  -> %d %s reg_id(s) fetched%n", result.size(), statusCode);
+        return result;
+    }
+
+    /**
+     * Writes a summary section showing, for FAILED + REPROCESS combined,
+     * how many reg_ids share the same (trn_type_code, trn_status_code, trn_status_comment).
+     */
+    private static void writeErrorSummary(BufferedWriter writer,
+                                          List<String[]> failedRows,
+                                          List<String[]> reprocessRows) throws IOException {
+        // key = "trn_type_code|trn_status_code|trn_status_comment"
+        Map<String, Long> countMap = new LinkedHashMap<>();
+
+        for (List<String[]> group : List.of(failedRows, reprocessRows)) {
+            for (String[] row : group) {
+                String key = row[3] + "|" + row[4] + "|" + row[5];
+                countMap.merge(key, 1L, Long::sum);
+            }
+        }
+
+        // Sort by count descending
+        List<Map.Entry<String, Long>> sorted = new ArrayList<>(countMap.entrySet());
+        sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+
+        writer.newLine();
+        writer.write(escapeCsv("=== Error Category Summary (FAILED + REPROCESS) ==="));
+        writer.newLine();
+        writer.write(escapeCsv("trn_type_code") + "," +
+                     escapeCsv("trn_status_code") + "," +
+                     escapeCsv("trn_status_comment") + "," +
+                     escapeCsv("count_reg_ids"));
+        writer.newLine();
+
+        for (Map.Entry<String, Long> entry : sorted) {
+            String[] parts = entry.getKey().split("\\|", -1);
+            writer.write(escapeCsv(parts.length > 0 ? parts[0] : "") + "," +
+                         escapeCsv(parts.length > 1 ? parts[1] : "") + "," +
+                         escapeCsv(parts.length > 2 ? parts[2] : "") + "," +
+                         escapeCsv(String.valueOf(entry.getValue())));
+            writer.newLine();
+        }
+    }
+
+    private static String nvl(String s) { return s == null ? "" : s; }
 }
