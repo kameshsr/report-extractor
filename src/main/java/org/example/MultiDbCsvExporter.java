@@ -1,6 +1,14 @@
 package org.example;
 
+import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.services.sheets.v4.Sheets;
+import com.google.api.services.sheets.v4.SheetsScopes;
+import com.google.api.services.sheets.v4.model.*;
+import com.google.auth.http.HttpCredentialsAdapter;
+import com.google.auth.oauth2.GoogleCredentials;
 import java.io.BufferedWriter;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,8 +65,9 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-04-27 8:50:00.000"; // upload/cr_dtimes filter
-    private static final String START_TIME        = "2026-04-27 9:37:00.000"; // processing start
+    private static final String UPLOAD_START_TIME = "2026-04-27 14:30:00.000"; // upload/cr_dtimes filter
+    private static final String START_TIME        = "2026-04-27 14:40:00.000"; // processing start
+    private static final String change = "pointed khazana version to 1.3.2";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -471,12 +480,22 @@ public class MultiDbCsvExporter {
             // --- Error category summary (FAILED + REPROCESS combined) ---
             writeErrorSummary(writer, failedDetails, reprocessDetails);
 
+            // --- Change notes ---
+            writer.newLine();
+            writer.write(escapeCsv("Notes"));
+            writer.newLine();
+            writer.write(escapeCsv(change));
+            writer.newLine();
+
             System.out.println("CSV export complete: " + Paths.get(outputFile).toAbsolutePath());
 
         } catch (IOException e) {
             System.err.println("Failed to write output CSV:");
             e.printStackTrace();
         }
+
+        // Write summary to Google Sheet (insert at top each run)
+        writeToGoogleSheet(endTime, durationStr, statusCounts, failedDetails, reprocessDetails);
     }
 
     /** Queries DB1 for status_code counts in regprc.registration since uploadStartTime. */
@@ -541,9 +560,8 @@ public class MultiDbCsvExporter {
     }
 
     /**
-     * For a given status_code (FAILED or REPROCESS), fetches all reg_ids from
-     * regprc.registration uploaded since UPLOAD_START_TIME, then for each reg_id
-     * fetches the 2nd-latest transaction row (LIMIT 1 OFFSET 1).
+     * For a given status_code (FAILED or REPROCESS), returns one row per reg_id with
+     * the 2nd-latest transaction (rn=2 via ROW_NUMBER) — single round-trip to the DB.
      *
      * Returns list of String[6]:
      *   {reg_id, reg_status_code, reg_status_comment,
@@ -554,46 +572,49 @@ public class MultiDbCsvExporter {
         String user     = DB_CONFIGS[0][1];
         String password = DB_CONFIGS[0][2];
 
-        String regSql =
-            "SELECT reg_id, status_code, status_comment " +
-            "FROM regprc.registration " +
-            "WHERE status_code = ? AND cr_dtimes > '" + UPLOAD_START_TIME + "' " +
-            "ORDER BY cr_dtimes DESC";
-
-        String trnSql =
-            "SELECT trn_type_code, status_code, status_comment " +
-            "FROM regprc.registration_transaction " +
-            "WHERE reg_id = ? " +
-            "ORDER BY cr_dtimes DESC " +
-            "LIMIT 1 OFFSET 1";
+        // Single query: CTE gets all matching reg_ids, ranked_trn ranks their transactions,
+        // LEFT JOIN picks rn=2 (the 2nd-latest = OFFSET 1). No per-row round-trips.
+        String sql =
+            "WITH reg_ids AS (\n" +
+            "    SELECT reg_id, status_code, status_comment\n" +
+            "    FROM regprc.registration\n" +
+            "    WHERE status_code = ?\n" +
+            "      AND cr_dtimes > '" + UPLOAD_START_TIME + "'\n" +
+            "),\n" +
+            "ranked_trn AS (\n" +
+            "    SELECT\n" +
+            "        rt.reg_id,\n" +
+            "        rt.trn_type_code,\n" +
+            "        rt.status_code       AS trn_status_code,\n" +
+            "        rt.status_comment    AS trn_status_comment,\n" +
+            "        ROW_NUMBER() OVER (PARTITION BY rt.reg_id ORDER BY rt.cr_dtimes DESC) AS rn\n" +
+            "    FROM regprc.registration_transaction rt\n" +
+            "    WHERE rt.reg_id IN (SELECT reg_id FROM reg_ids)\n" +
+            ")\n" +
+            "SELECT\n" +
+            "    r.reg_id,\n" +
+            "    r.status_code,\n" +
+            "    r.status_comment,\n" +
+            "    COALESCE(t.trn_type_code,       'N/A') AS trn_type_code,\n" +
+            "    COALESCE(t.trn_status_code,     'N/A') AS trn_status_code,\n" +
+            "    COALESCE(t.trn_status_comment,  'N/A') AS trn_status_comment\n" +
+            "FROM reg_ids r\n" +
+            "LEFT JOIN ranked_trn t ON r.reg_id = t.reg_id AND t.rn = 2\n" +
+            "ORDER BY r.reg_id";
 
         List<String[]> result = new ArrayList<>();
-        System.out.printf("Fetching %s reg_ids from DB1...%n", statusCode);
+        System.out.printf("Fetching %s reg_ids from DB1 (single query)...%n", statusCode);
 
         try (Connection conn = DriverManager.getConnection(url, user, password);
-             PreparedStatement regPs = conn.prepareStatement(regSql);
-             PreparedStatement trnPs = conn.prepareStatement(trnSql)) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            regPs.setString(1, statusCode);
-            try (ResultSet regRs = regPs.executeQuery()) {
-                while (regRs.next()) {
-                    String regId         = regRs.getString(1);
-                    String regStatus     = regRs.getString(2);
-                    String regComment    = nvl(regRs.getString(3));
-
-                    String trnType    = "N/A";
-                    String trnStatus  = "N/A";
-                    String trnComment = "N/A";
-
-                    trnPs.setString(1, regId);
-                    try (ResultSet trnRs = trnPs.executeQuery()) {
-                        if (trnRs.next()) {
-                            trnType    = nvl(trnRs.getString(1));
-                            trnStatus  = nvl(trnRs.getString(2));
-                            trnComment = nvl(trnRs.getString(3));
-                        }
-                    }
-                    result.add(new String[]{regId, regStatus, regComment, trnType, trnStatus, trnComment});
+            ps.setString(1, statusCode);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new String[]{
+                        nvl(rs.getString(1)), nvl(rs.getString(2)), nvl(rs.getString(3)),
+                        nvl(rs.getString(4)), nvl(rs.getString(5)), nvl(rs.getString(6))
+                    });
                 }
             }
         } catch (SQLException e) {
@@ -644,4 +665,121 @@ public class MultiDbCsvExporter {
     }
 
     private static String nvl(String s) { return s == null ? "" : s; }
+
+    private static final String SPREADSHEET_ID = "SPREADSHEET_ID_REDACTED";
+    private static final String CREDENTIALS_FILE = "credentials.json"; // service-account key in working dir
+
+    /**
+     * Inserts a summary block at the top of the Google Sheet on every run.
+     * Requires a Google service-account credentials.json in the working directory,
+     * with the Sheet shared to the service-account email (Editor permission).
+     */
+    private static void writeToGoogleSheet(String endTime, String durationStr,
+                                           List<String[]> statusCounts,
+                                           List<String[]> failedDetails,
+                                           List<String[]> reprocessDetails) {
+        try {
+            GoogleCredentials credentials;
+            try (FileInputStream fis = new FileInputStream(CREDENTIALS_FILE)) {
+                credentials = GoogleCredentials.fromStream(fis)
+                        .createScoped(Collections.singletonList(SheetsScopes.SPREADSHEETS));
+            }
+
+            Sheets sheets = new Sheets.Builder(
+                    GoogleNetHttpTransport.newTrustedTransport(),
+                    GsonFactory.getDefaultInstance(),
+                    new HttpCredentialsAdapter(credentials))
+                    .setApplicationName("MOSIP-Report-Exporter")
+                    .build();
+
+            // Build rows to insert
+            List<List<Object>> rows = new ArrayList<>();
+
+            // Run header
+            String runTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            rows.add(row("=== RUN: " + runTime + " ==="));
+
+            // Time info
+            rows.add(row("Upload Start Time", "Processing Start Time", "End Time", "Duration (End - Processing Start)"));
+            rows.add(row(UPLOAD_START_TIME, START_TIME, endTime, durationStr));
+
+            // Status counts
+            List<Object> statusHeaders = new ArrayList<>();
+            List<Object> statusValues  = new ArrayList<>();
+            long total = 0;
+            for (String[] sc : statusCounts) {
+                statusHeaders.add(sc[0]);
+                statusValues.add(sc[1]);
+                try { total += Long.parseLong(sc[1]); } catch (NumberFormatException ignored) {}
+            }
+            statusHeaders.add("TOTAL");
+            statusValues.add(String.valueOf(total));
+            rows.add(statusHeaders);
+            rows.add(statusValues);
+
+            // Change note
+            rows.add(row("Change", change));
+
+            // Error summary
+            rows.add(row("trn_type_code", "trn_status_code", "trn_status_comment", "count_reg_ids"));
+            Map<String, Long> countMap = new LinkedHashMap<>();
+            for (List<String[]> group : List.of(failedDetails, reprocessDetails)) {
+                for (String[] r : group) {
+                    String key = r[3] + " " + r[4] + " " + r[5];
+                    countMap.merge(key, 1L, Long::sum);
+                }
+            }
+            List<Map.Entry<String, Long>> sorted = new ArrayList<>(countMap.entrySet());
+            sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+            for (Map.Entry<String, Long> entry : sorted) {
+                String[] parts = entry.getKey().split(" ", -1);
+                rows.add(row(
+                    parts.length > 0 ? parts[0] : "",
+                    parts.length > 1 ? parts[1] : "",
+                    parts.length > 2 ? parts[2] : "",
+                    String.valueOf(entry.getValue())
+                ));
+            }
+
+            // Blank separator between runs
+            rows.add(row(""));
+
+            int numRows = rows.size();
+
+            // Step 1: insert empty rows at the very top (index 0)
+            sheetsInsertRows(sheets, numRows);
+
+            // Step 2: write data into those rows
+            sheetsWriteValues(sheets, rows);
+
+            System.out.println("Google Sheet updated: " + numRows + " rows inserted at top.");
+
+        } catch (Exception e) {
+            System.err.println("Google Sheet update failed: " + e.getMessage());
+        }
+    }
+
+    private static void sheetsInsertRows(Sheets sheets, int count) throws Exception {
+        InsertDimensionRequest insert = new InsertDimensionRequest()
+                .setRange(new DimensionRange()
+                        .setSheetId(0)
+                        .setDimension("ROWS")
+                        .setStartIndex(0)
+                        .setEndIndex(count))
+                .setInheritFromBefore(false);
+        sheets.spreadsheets().batchUpdate(SPREADSHEET_ID,
+                new BatchUpdateSpreadsheetRequest()
+                        .setRequests(Collections.singletonList(new Request().setInsertDimension(insert))))
+                .execute();
+    }
+
+    private static void sheetsWriteValues(Sheets sheets, List<List<Object>> rows) throws Exception {
+        ValueRange body = new ValueRange().setValues(rows);
+        sheets.spreadsheets().values()
+                .update(SPREADSHEET_ID, "Sheet1!A1", body)
+                .setValueInputOption("RAW")
+                .execute();
+    }
+
+    private static List<Object> row(Object... items) { return Arrays.asList(items); }
 }
