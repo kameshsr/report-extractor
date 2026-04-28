@@ -18,6 +18,16 @@ import java.sql.*;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -65,9 +75,9 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-04-28 5:30:00.000"; // upload/cr_dtimes filter
-    private static final String START_TIME        = "2026-04-28 5:50:00.000"; // processing start
-    private static final String change = "pointed khazana version to 1.3.2";
+    private static final String UPLOAD_START_TIME = "2026-04-28 13:30:00.000"; // upload/cr_dtimes filter
+    private static final String START_TIME        = "2026-04-28 13:40:00.000"; // processing start 12:37
+    private static final String change = "Added logs in packet manager";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -283,7 +293,7 @@ public class MultiDbCsvExporter {
             return;
         }
 
-        //String endTime = "2026-04-23 19:20:00.000";
+//        String endTime = "2026-04-28 11:10:00.000";
         String endTime = fetchEndTime();
         if (endTime == null) {
             System.err.println("Could not determine END_TIME from DB1 — aborting.");
@@ -385,7 +395,10 @@ public class MultiDbCsvExporter {
                          escapeCsv(endTime) + "," +
                          escapeCsv(durationStr));
             writer.newLine();
-            // Row 3: blank
+            // Notes
+            writer.write(escapeCsv("Notes") + "," + escapeCsv(change));
+            writer.newLine();
+            // blank
             writer.newLine();
 
             // Row 4: registration status_codes as column headers + TOTAL
@@ -480,12 +493,6 @@ public class MultiDbCsvExporter {
             // --- Error category summary (FAILED + REPROCESS combined) ---
             writeErrorSummary(writer, failedDetails, reprocessDetails);
 
-            // --- Change notes ---
-            writer.newLine();
-            writer.write(escapeCsv("Notes"));
-            writer.newLine();
-            writer.write(escapeCsv(change));
-            writer.newLine();
 
             System.out.println("CSV export complete: " + Paths.get(outputFile).toAbsolutePath());
 
@@ -496,6 +503,7 @@ public class MultiDbCsvExporter {
 
         // Write summary to Google Sheet (insert at top each run)
         writeToGoogleSheet(endTime, durationStr, statusCounts, failedDetails, reprocessDetails, dbColNames, dbData, allIntervals);
+        uploadToSlack(outputFile);
     }
 
     /** Queries DB1 for status_code counts in regprc.registration since uploadStartTime. */
@@ -669,6 +677,9 @@ public class MultiDbCsvExporter {
     private static final String SPREADSHEET_ID = "SPREADSHEET_ID_REDACTED";
     private static final String CREDENTIALS_FILE = "credentials.json"; // service-account key in working dir
 
+    private static final String SLACK_TOKEN   = "SLACK_TOKEN_REDACTED"; // Slack bot token
+    private static final String SLACK_CHANNEL = "C0ARYKTH1FX";     // channel ID (e.g. C0123456789)
+
     /**
      * Inserts a summary block at the top of the Google Sheet on every run.
      * Requires a Google service-account credentials.json in the working directory,
@@ -703,6 +714,9 @@ public class MultiDbCsvExporter {
             // Time info
             rows.add(row("Upload Start Time", "Processing Start Time", "End Time", "Duration (End - Processing Start)"));
             rows.add(row(UPLOAD_START_TIME, START_TIME, endTime, durationStr));
+
+            // Notes (shown at top so it is visible immediately)
+            rows.add(row("Notes", change));
             rows.add(row(""));
 
             // Status counts
@@ -790,11 +804,6 @@ public class MultiDbCsvExporter {
                 ));
             }
 
-            // Notes
-            rows.add(row(""));
-            rows.add(row("Notes"));
-            rows.add(row(change));
-            rows.add(row(""));
 
             int numRows = rows.size();
             sheetsInsertRows(sheets, numRows);
@@ -829,4 +838,69 @@ public class MultiDbCsvExporter {
     }
 
     private static List<Object> row(Object... items) { return Arrays.asList(items); }
+
+    private static void uploadToSlack(String filePath) {
+        try {
+            Path path = Paths.get(filePath);
+            byte[] fileBytes = Files.readAllBytes(path);
+            String fileName = path.getFileName().toString();
+
+            HttpClient client = HttpClient.newBuilder()
+                    .proxy(ProxySelector.getDefault())
+                    .build();
+
+            // Step 1: get upload URL + file ID
+            HttpRequest req1 = HttpRequest.newBuilder()
+                    .uri(URI.create("https://slack.com/api/files.getUploadURLExternal"
+                            + "?filename=" + fileName + "&length=" + fileBytes.length))
+                    .header("Authorization", "Bearer " + SLACK_TOKEN)
+                    .GET()
+                    .build();
+            String resp1 = client.send(req1, HttpResponse.BodyHandlers.ofString()).body();
+            if (!resp1.contains("\"ok\":true")) {
+                System.err.println("Slack getUploadURL failed: " + resp1);
+                return;
+            }
+            String uploadUrl = slackExtractField(resp1, "upload_url").replace("\\/", "/");
+            String fileId    = slackExtractField(resp1, "file_id");
+
+            // Step 2: upload file bytes to the pre-signed URL
+            HttpRequest req2 = HttpRequest.newBuilder()
+                    .uri(URI.create(uploadUrl))
+                    .header("Content-Type", "application/octet-stream")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(fileBytes))
+                    .build();
+            HttpResponse<String> httpResp2 = client.send(req2, HttpResponse.BodyHandlers.ofString());
+            if (httpResp2.statusCode() != 200) {
+                System.err.println("Slack file upload failed: " + httpResp2.body());
+                return;
+            }
+
+            // Step 3: complete upload and share to channel
+            String body = "{\"files\":[{\"id\":\"" + fileId + "\"}],\"channel_id\":\"" + SLACK_CHANNEL + "\"}";
+            HttpRequest req3 = HttpRequest.newBuilder()
+                    .uri(URI.create("https://slack.com/api/files.completeUploadExternal"))
+                    .header("Authorization", "Bearer " + SLACK_TOKEN)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            String resp3 = client.send(req3, HttpResponse.BodyHandlers.ofString()).body();
+            if (resp3.contains("\"ok\":true")) {
+                System.out.println("Slack upload success: " + fileName);
+            } else {
+                System.err.println("Slack complete failed: " + resp3);
+            }
+
+        } catch (Exception e) {
+            System.err.println("Slack upload error: " + e.getMessage());
+        }
+    }
+
+    private static String slackExtractField(String json, String key) {
+        String search = "\"" + key + "\":\"";
+        int start = json.indexOf(search) + search.length();
+        int end   = json.indexOf("\"", start);
+        return json.substring(start, end);
+    }
+
 }
