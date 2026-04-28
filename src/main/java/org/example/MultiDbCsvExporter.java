@@ -65,8 +65,8 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-04-27 14:30:00.000"; // upload/cr_dtimes filter
-    private static final String START_TIME        = "2026-04-27 14:40:00.000"; // processing start
+    private static final String UPLOAD_START_TIME = "2026-04-28 5:30:00.000"; // upload/cr_dtimes filter
+    private static final String START_TIME        = "2026-04-28 5:50:00.000"; // processing start
     private static final String change = "pointed khazana version to 1.3.2";
     // -----------------------------------------------------------------------
 
@@ -495,7 +495,7 @@ public class MultiDbCsvExporter {
         }
 
         // Write summary to Google Sheet (insert at top each run)
-        writeToGoogleSheet(endTime, durationStr, statusCounts, failedDetails, reprocessDetails);
+        writeToGoogleSheet(endTime, durationStr, statusCounts, failedDetails, reprocessDetails, dbColNames, dbData, allIntervals);
     }
 
     /** Queries DB1 for status_code counts in regprc.registration since uploadStartTime. */
@@ -677,7 +677,10 @@ public class MultiDbCsvExporter {
     private static void writeToGoogleSheet(String endTime, String durationStr,
                                            List<String[]> statusCounts,
                                            List<String[]> failedDetails,
-                                           List<String[]> reprocessDetails) {
+                                           List<String[]> reprocessDetails,
+                                           List<List<String>> dbColNames,
+                                           List<Map<String, String[]>> dbData,
+                                           Set<String> allIntervals) {
         try {
             GoogleCredentials credentials;
             try (FileInputStream fis = new FileInputStream(CREDENTIALS_FILE)) {
@@ -692,16 +695,15 @@ public class MultiDbCsvExporter {
                     .setApplicationName("MOSIP-Report-Exporter")
                     .build();
 
-            // Build rows to insert
             List<List<Object>> rows = new ArrayList<>();
 
-            // Run header
             String runTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             rows.add(row("=== RUN: " + runTime + " ==="));
 
             // Time info
             rows.add(row("Upload Start Time", "Processing Start Time", "End Time", "Duration (End - Processing Start)"));
             rows.add(row(UPLOAD_START_TIME, START_TIME, endTime, durationStr));
+            rows.add(row(""));
 
             // Status counts
             List<Object> statusHeaders = new ArrayList<>();
@@ -716,23 +718,70 @@ public class MultiDbCsvExporter {
             statusValues.add(String.valueOf(total));
             rows.add(statusHeaders);
             rows.add(statusValues);
+            rows.add(row(""));
 
-            // Change note
-            rows.add(row("Change", change));
+            // Interval data header -- same columns as CSV
+            List<Object> intervalHeader = new ArrayList<>();
+            intervalHeader.add("interval_start");
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                intervalHeader.add("source_db");
+                intervalHeader.addAll(dbColNames.get(i));
+            }
+            rows.add(intervalHeader);
 
-            // Error summary
+            // Interval data rows + accumulate per-column totals for TOTAL row
+            int numCols = intervalHeader.size();
+            long[] colTotals = new long[numCols];
+            for (String interval : allIntervals) {
+                List<Object> dataRow = new ArrayList<>();
+                dataRow.add(interval);
+                int ci = 1;
+                for (int i = 0; i < DB_CONFIGS.length; i++) {
+                    dataRow.add(DB_CONFIGS[i][3]);
+                    ci++;
+                    String[] vals = dbData.get(i).get(interval);
+                    int colCount = dbColNames.get(i).size();
+                    if (vals != null) {
+                        for (String v : vals) {
+                            dataRow.add(v);
+                            try { colTotals[ci] += Long.parseLong(v); } catch (NumberFormatException ignored) {}
+                            ci++;
+                        }
+                    } else {
+                        for (int c = 0; c < colCount; c++) { dataRow.add(""); ci++; }
+                    }
+                }
+                rows.add(dataRow);
+            }
+
+            // TOTAL row -- computed sums; source_db columns blank
+            List<Object> totalRow = new ArrayList<>();
+            totalRow.add("TOTAL");
+            int ci = 1;
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                totalRow.add("");
+                ci++;
+                for (int j = 0; j < dbColNames.get(i).size(); j++) {
+                    totalRow.add(String.valueOf(colTotals[ci++]));
+                }
+            }
+            rows.add(totalRow);
+            rows.add(row(""));
+
+            // Error category summary
+            rows.add(row("=== Error Category Summary (FAILED + REPROCESS) ==="));
             rows.add(row("trn_type_code", "trn_status_code", "trn_status_comment", "count_reg_ids"));
             Map<String, Long> countMap = new LinkedHashMap<>();
             for (List<String[]> group : List.of(failedDetails, reprocessDetails)) {
                 for (String[] r : group) {
-                    String key = r[3] + " " + r[4] + " " + r[5];
+                    String key = r[3] + "|" + r[4] + "|" + r[5];
                     countMap.merge(key, 1L, Long::sum);
                 }
             }
             List<Map.Entry<String, Long>> sorted = new ArrayList<>(countMap.entrySet());
             sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
             for (Map.Entry<String, Long> entry : sorted) {
-                String[] parts = entry.getKey().split(" ", -1);
+                String[] parts = entry.getKey().split("\\|", -1);
                 rows.add(row(
                     parts.length > 0 ? parts[0] : "",
                     parts.length > 1 ? parts[1] : "",
@@ -741,17 +790,15 @@ public class MultiDbCsvExporter {
                 ));
             }
 
-            // Blank separator between runs
+            // Notes
+            rows.add(row(""));
+            rows.add(row("Notes"));
+            rows.add(row(change));
             rows.add(row(""));
 
             int numRows = rows.size();
-
-            // Step 1: insert empty rows at the very top (index 0)
             sheetsInsertRows(sheets, numRows);
-
-            // Step 2: write data into those rows
             sheetsWriteValues(sheets, rows);
-
             System.out.println("Google Sheet updated: " + numRows + " rows inserted at top.");
 
         } catch (Exception e) {
