@@ -18,16 +18,11 @@ import java.sql.*;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.ProxySelector;
 import java.net.URI;
-import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -53,6 +48,13 @@ public class MultiDbCsvExporter {
     private static final String DB_USER = "postgres";
     private static final String DB_PASS = "DB_PASS_REDACTED";
 
+    /**
+     * Set to false to skip a query/DB in this run.
+     * Index matches DB_CONFIGS / QUERIES (0 = regprc, 1 = credential, 2 = ida).
+     * Example — run only query 2: { false, true, false }
+     */
+    private static final boolean[] ENABLED_QUERIES = { true, true, true };
+
     /** One entry per database: {jdbcUrl, user, password, displayLabel} */
     private static final String[][] DB_CONFIGS = {
         {
@@ -75,9 +77,9 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-04-28 13:30:00.000"; // upload/cr_dtimes filter
-    private static final String START_TIME        = "2026-04-28 13:40:00.000"; // processing start 12:37
-    private static final String change = "Added logs in packet manager";
+    private static final String UPLOAD_START_TIME = "2026-05-04 13:11:00.000"; 
+    private static final String START_TIME        = "2026-05-04 13:20:00.000"; // processing start 
+    private static final String change = "Restarted redis server";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -245,7 +247,7 @@ public class MultiDbCsvExporter {
             "    + INTERVAL '1 minute' * (FLOOR(EXTRACT(minute FROM cr_dtimes) / 10) * 10)\n" +
             "    AS interval_start,\n" +
             "\n" +
-            "    COUNT(*) AS TOTAL\n" +
+            "    COUNT(*) / 2 AS total_in_identity_cache_table\n" +
             "\n" +
             "FROM ida.identity_cache\n" +
             "\n" +
@@ -332,6 +334,11 @@ public class MultiDbCsvExporter {
         Set<String> allIntervals = new TreeSet<>();                // sorted union of all interval_start values
 
         for (int i = 0; i < DB_CONFIGS.length; i++) {
+            if (!ENABLED_QUERIES[i]) {
+                dbColNames.add(new ArrayList<>());
+                dbData.add(new LinkedHashMap<>());
+                continue;
+            }
             String url      = DB_CONFIGS[i][0];
             String user     = DB_CONFIGS[i][1];
             String password = DB_CONFIGS[i][2];
@@ -427,10 +434,14 @@ public class MultiDbCsvExporter {
             // Pre-compute which 1-based columns are data columns (not interval_start or source_db).
             // Layout: col1=interval_start, then per DB: source_db | data cols...
             int totalCols = 1; // interval_start
-            for (int i = 0; i < DB_CONFIGS.length; i++) totalCols += 1 + dbColNames.get(i).size();
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
+                totalCols += 1 + dbColNames.get(i).size();
+            }
             boolean[] isDataCol = new boolean[totalCols + 1]; // 1-based, false = skip in SUM row
             int ci = 2; // col 1 is interval_start (not a data col)
             for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
                 ci++; // source_db — not a data col
                 for (int j = 0; j < dbColNames.get(i).size(); j++) {
                     isDataCol[ci++] = true;
@@ -440,6 +451,7 @@ public class MultiDbCsvExporter {
             // Row 7: main data header
             writer.write(escapeCsv("interval_start"));
             for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
                 writer.write(",");
                 writer.write(escapeCsv("source_db"));
                 for (String col : dbColNames.get(i)) {
@@ -455,6 +467,7 @@ public class MultiDbCsvExporter {
             for (String interval : allIntervals) {
                 writer.write(escapeCsv(interval));
                 for (int i = 0; i < DB_CONFIGS.length; i++) {
+                    if (!ENABLED_QUERIES[i]) continue;
                     String label   = DB_CONFIGS[i][3];
                     String[] row   = dbData.get(i).get(interval);
                     int colCount   = dbColNames.get(i).size();
@@ -738,6 +751,7 @@ public class MultiDbCsvExporter {
             List<Object> intervalHeader = new ArrayList<>();
             intervalHeader.add("interval_start");
             for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
                 intervalHeader.add("source_db");
                 intervalHeader.addAll(dbColNames.get(i));
             }
@@ -751,6 +765,7 @@ public class MultiDbCsvExporter {
                 dataRow.add(interval);
                 int ci = 1;
                 for (int i = 0; i < DB_CONFIGS.length; i++) {
+                    if (!ENABLED_QUERIES[i]) continue;
                     dataRow.add(DB_CONFIGS[i][3]);
                     ci++;
                     String[] vals = dbData.get(i).get(interval);
@@ -773,6 +788,7 @@ public class MultiDbCsvExporter {
             totalRow.add("TOTAL");
             int ci = 1;
             for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
                 totalRow.add("");
                 ci++;
                 for (int j = 0; j < dbColNames.get(i).size(); j++) {
