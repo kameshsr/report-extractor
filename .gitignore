@@ -4,6 +4,7 @@ config.properties
 target/
 *.log
 *.csv
+*.xlsx
 *.zip
 *.txt
 .idea/

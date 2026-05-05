@@ -9,7 +9,10 @@ import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
 import java.io.BufferedWriter;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.xssf.usermodel.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -276,12 +279,12 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
 
     public static void main(String[] args) {
-        // Build output path: report/10_min_report_<yyyyMMdd>_<HHmmss>.csv
+        // Build output path: report/10_min_report_<yyyyMMdd>_<HHmmss>.xlsx
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         Path reportDir = Paths.get(REPORT_DIR);
         String outputFile = args.length > 0
                 ? args[0]
-                : reportDir.resolve("10_min_report_" + timestamp + ".csv").toString();
+                : reportDir.resolve("10_min_report_" + timestamp + ".xlsx").toString();
 
         // Ensure report directory exists
         try {
@@ -395,136 +398,9 @@ public class MultiDbCsvExporter {
             dbData.add(rows);
         }
 
-        // Phase 2: write combined CSV — one row per interval_start, DB columns side by side.
-        try (BufferedWriter writer = Files.newBufferedWriter(
-                Paths.get(outputFile),
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING)) {
-
-            // --- Summary block at the top ---
-            // Row 1: labels in one row
-            writer.write(escapeCsv("Upload Start Time") + "," +
-                         escapeCsv("Processing Start Time") + "," +
-                         escapeCsv("End Time") + "," +
-                         escapeCsv("Duration (End - Processing Start)"));
-            writer.newLine();
-            // Row 2: values in one row
-            writer.write(escapeCsv(UPLOAD_START_TIME) + "," +
-                         escapeCsv(START_TIME) + "," +
-                         escapeCsv(endTime) + "," +
-                         escapeCsv(durationStr));
-            writer.newLine();
-            // Notes
-            writer.write(escapeCsv("Notes") + "," + escapeCsv(change));
-            writer.newLine();
-            // blank
-            writer.newLine();
-
-            // Row 4: registration status_codes as column headers + TOTAL
-            long totalStatusCount = 0;
-            for (String[] sc : statusCounts) {
-                try { totalStatusCount += Long.parseLong(sc[1]); } catch (NumberFormatException ignored) {}
-            }
-            StringBuilder statusHeaders = new StringBuilder();
-            for (int s = 0; s < statusCounts.size(); s++) {
-                if (s > 0) statusHeaders.append(",");
-                statusHeaders.append(escapeCsv(statusCounts.get(s)[0]));
-            }
-            statusHeaders.append(",").append(escapeCsv("TOTAL"));
-            writer.write(statusHeaders.toString()); writer.newLine();
-            // Row 5: counts + total
-            StringBuilder statusValues = new StringBuilder();
-            for (int s = 0; s < statusCounts.size(); s++) {
-                if (s > 0) statusValues.append(",");
-                statusValues.append(escapeCsv(statusCounts.get(s)[1]));
-            }
-            statusValues.append(",").append(escapeCsv(String.valueOf(totalStatusCount)));
-            writer.write(statusValues.toString()); writer.newLine();
-            // Row 6: blank separator before main table
-            writer.newLine();
-
-            // Pre-compute which 1-based columns are data columns (not interval_start or source_db).
-            // Layout: col1=interval_start, then per DB: source_db | data cols...
-            int totalCols = 1; // interval_start
-            for (int i = 0; i < DB_CONFIGS.length; i++) {
-                if (!ENABLED_QUERIES[i]) continue;
-                totalCols += 1 + dbColNames.get(i).size();
-            }
-            boolean[] isDataCol = new boolean[totalCols + 1]; // 1-based, false = skip in SUM row
-            int ci = 2; // col 1 is interval_start (not a data col)
-            for (int i = 0; i < DB_CONFIGS.length; i++) {
-                if (!ENABLED_QUERIES[i]) continue;
-                ci++; // source_db — not a data col
-                for (int j = 0; j < dbColNames.get(i).size(); j++) {
-                    isDataCol[ci++] = true;
-                }
-            }
-
-            // Row 7: main data header
-            writer.write(escapeCsv("interval_start"));
-            for (int i = 0; i < DB_CONFIGS.length; i++) {
-                if (!ENABLED_QUERIES[i]) continue;
-                writer.write(",");
-                writer.write(escapeCsv("source_db"));
-                for (String col : dbColNames.get(i)) {
-                    writer.write(",");
-                    writer.write(escapeCsv(col));
-                }
-            }
-            writer.newLine();
-
-            // Data rows start at row 8 (6 fixed summary rows + 1 blank + 1 main header)
-            int firstDataRow = 8;
-            int rowNum = firstDataRow;
-            for (String interval : allIntervals) {
-                writer.write(escapeCsv(interval));
-                for (int i = 0; i < DB_CONFIGS.length; i++) {
-                    if (!ENABLED_QUERIES[i]) continue;
-                    String label   = DB_CONFIGS[i][3];
-                    String[] row   = dbData.get(i).get(interval);
-                    int colCount   = dbColNames.get(i).size();
-                    writer.write(",");
-                    writer.write(escapeCsv(label));
-                    if (row != null) {
-                        for (String v : row) {
-                            writer.write(",");
-                            writer.write(escapeCsv(v));
-                        }
-                    } else {
-                        for (int c = 0; c < colCount; c++) {
-                            writer.write(",");
-                            writer.write(escapeCsv(""));
-                        }
-                    }
-                }
-                writer.newLine();
-                rowNum++;
-            }
-
-            // SUM row — one row below the last data row, summing each data column
-            int lastDataRow = rowNum - 1;
-            writer.write(escapeCsv("TOTAL"));
-            for (int col = 2; col <= totalCols; col++) {
-                writer.write(",");
-                if (isDataCol[col]) {
-                    String colLetter = toExcelCol(col);
-                    writer.write("=SUM(" + colLetter + firstDataRow + ":" + colLetter + lastDataRow + ")");
-                } else {
-                    writer.write(escapeCsv(""));
-                }
-            }
-            writer.newLine();
-
-            // --- Error category summary (FAILED + REPROCESS combined) ---
-            writeErrorSummary(writer, failedDetails, reprocessDetails);
-
-
-            System.out.println("CSV export complete: " + Paths.get(outputFile).toAbsolutePath());
-
-        } catch (IOException e) {
-            System.err.println("Failed to write output CSV:");
-            e.printStackTrace();
-        }
+        // Phase 2: write colored Excel report
+        writeExcel(outputFile, endTime, durationStr, statusCounts, failedDetails, reprocessDetails,
+                   dbColNames, dbData, allIntervals);
 
         // Write summary to Google Sheet (insert at top each run)
         writeToGoogleSheet(endTime, durationStr, statusCounts, failedDetails, reprocessDetails, dbColNames, dbData, allIntervals);
@@ -569,6 +445,160 @@ public class MultiDbCsvExporter {
             System.err.println("Failed to fetch END_TIME: " + e.getMessage());
         }
         return null;
+    }
+
+    private static void writeExcel(String outputFile, String endTime, String durationStr,
+            List<String[]> statusCounts, List<String[]> failedDetails, List<String[]> reprocessDetails,
+            List<List<String>> dbColNames, List<Map<String, String[]>> dbData,
+            Set<String> allIntervals) {
+        try (XSSFWorkbook wb = new XSSFWorkbook();
+             FileOutputStream fos = new FileOutputStream(outputFile)) {
+
+            XSSFSheet sheet = wb.createSheet("Report");
+
+            XSSFCellStyle sTimeHeader  = xlStyle(wb, new int[]{21,  101, 192},  new int[]{255,255,255}, true);
+            XSSFCellStyle sTimeValues  = xlStyle(wb, new int[]{227, 241, 253},  null,                   false);
+            XSSFCellStyle sNotes       = xlStyle(wb, new int[]{255, 248, 225},  new int[]{230, 81,  0}, true);
+            XSSFCellStyle sBlank       = xlStyle(wb, new int[]{238, 238, 238},  null,                   false);
+            XSSFCellStyle sStatusHdr   = xlStyle(wb, new int[]{27,  94,  32},   new int[]{255,255,255}, true);
+            XSSFCellStyle sStatusVal   = xlStyle(wb, new int[]{232, 245, 233},  null,                   false);
+            XSSFCellStyle sIntervalHdr = xlStyle(wb, new int[]{74,  20,  140},  new int[]{255,255,255}, true);
+            XSSFCellStyle sTotal       = xlStyle(wb, new int[]{230, 102, 0},    new int[]{255,255,255}, true);
+            XSSFCellStyle sErrSection  = xlStyle(wb, new int[]{183, 28,  28},   new int[]{255,255,255}, true);
+            XSSFCellStyle sErrColHdr   = xlStyle(wb, new int[]{252, 228, 228},  null,                   false);
+
+            int rowIdx = 0;
+
+            xlRow(sheet, rowIdx++, sTimeHeader, "Upload Start Time", "Processing Start Time", "End Time", "Duration (End - Processing Start)");
+            xlRow(sheet, rowIdx++, sTimeValues, UPLOAD_START_TIME, START_TIME, endTime, durationStr);
+            xlRow(sheet, rowIdx++, sNotes,      "Notes", change);
+            xlBlankRow(sheet, rowIdx++, sBlank, 10);
+
+            List<String> sHdrList = new ArrayList<>(), sValList = new ArrayList<>();
+            long totalStat = 0;
+            for (String[] sc : statusCounts) {
+                sHdrList.add(sc[0]); sValList.add(sc[1]);
+                try { totalStat += Long.parseLong(sc[1]); } catch (NumberFormatException ignored) {}
+            }
+            sHdrList.add("TOTAL"); sValList.add(String.valueOf(totalStat));
+            xlRow(sheet, rowIdx++, sStatusHdr, sHdrList.toArray(new String[0]));
+            xlRow(sheet, rowIdx++, sStatusVal,  sValList.toArray(new String[0]));
+            xlBlankRow(sheet, rowIdx++, sBlank, sHdrList.size());
+
+            // Build column layout (1-based indices)
+            int totalCols = 1;
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
+                totalCols += 1 + dbColNames.get(i).size();
+            }
+            boolean[] isDataCol = new boolean[totalCols + 1];
+            int ci = 2;
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
+                ci++;
+                for (int j = 0; j < dbColNames.get(i).size(); j++) isDataCol[ci++] = true;
+            }
+
+            // Interval header row
+            List<String> hdrCols = new ArrayList<>();
+            hdrCols.add("interval_start");
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
+                hdrCols.add("source_db");
+                hdrCols.addAll(dbColNames.get(i));
+            }
+            xlRow(sheet, rowIdx++, sIntervalHdr, hdrCols.toArray(new String[0]));
+
+            // Data rows
+            int firstDataExcel = rowIdx + 1; // 1-based Excel row number
+            for (String interval : allIntervals) {
+                XSSFRow dataRow = sheet.createRow(rowIdx++);
+                int col = 0;
+                dataRow.createCell(col++).setCellValue(interval);
+                for (int i = 0; i < DB_CONFIGS.length; i++) {
+                    if (!ENABLED_QUERIES[i]) continue;
+                    dataRow.createCell(col++).setCellValue(DB_CONFIGS[i][3]);
+                    String[] vals = dbData.get(i).get(interval);
+                    int colCount = dbColNames.get(i).size();
+                    if (vals != null) {
+                        for (String v : vals) {
+                            XSSFCell cell = dataRow.createCell(col++);
+                            try { cell.setCellValue(Long.parseLong(v)); }
+                            catch (NumberFormatException ignored) { cell.setCellValue(v == null ? "" : v); }
+                        }
+                    } else {
+                        for (int c = 0; c < colCount; c++) dataRow.createCell(col++).setCellValue("");
+                    }
+                }
+            }
+            int lastDataExcel = rowIdx; // 1-based Excel row number of last data row
+
+            // TOTAL row
+            XSSFRow xlTotalRow = sheet.createRow(rowIdx++);
+            XSSFCell lbl = xlTotalRow.createCell(0);
+            lbl.setCellValue("TOTAL"); lbl.setCellStyle(sTotal);
+            for (int col = 2; col <= totalCols; col++) {
+                XSSFCell cell = xlTotalRow.createCell(col - 1);
+                cell.setCellStyle(sTotal);
+                if (isDataCol[col]) {
+                    cell.setCellFormula("SUM(" + toExcelCol(col) + firstDataExcel + ":" + toExcelCol(col) + lastDataExcel + ")");
+                }
+            }
+
+            xlBlankRow(sheet, rowIdx++, sBlank, totalCols);
+            xlRow(sheet, rowIdx++, sErrSection, "=== Error Category Summary (FAILED + REPROCESS) ===");
+            xlRow(sheet, rowIdx++, sErrColHdr,  "trn_type_code", "trn_status_code", "trn_status_comment", "count_reg_ids");
+
+            Map<String, Long> countMap = new LinkedHashMap<>();
+            for (List<String[]> group : List.of(failedDetails, reprocessDetails)) {
+                for (String[] r : group) countMap.merge(r[3] + "|" + r[4] + "|" + r[5], 1L, Long::sum);
+            }
+            List<Map.Entry<String, Long>> sorted = new ArrayList<>(countMap.entrySet());
+            sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+            for (Map.Entry<String, Long> entry : sorted) {
+                String[] parts = entry.getKey().split("\\|", -1);
+                XSSFRow errRow = sheet.createRow(rowIdx++);
+                errRow.createCell(0).setCellValue(parts.length > 0 ? parts[0] : "");
+                errRow.createCell(1).setCellValue(parts.length > 1 ? parts[1] : "");
+                errRow.createCell(2).setCellValue(parts.length > 2 ? parts[2] : "");
+                errRow.createCell(3).setCellValue(entry.getValue());
+            }
+
+            for (int c = 0; c < totalCols; c++) sheet.setColumnWidth(c, 4000);
+
+            wb.write(fos);
+            System.out.println("Excel export complete: " + Paths.get(outputFile).toAbsolutePath());
+
+        } catch (IOException e) {
+            System.err.println("Failed to write Excel file: " + e.getMessage());
+        }
+    }
+
+    private static void xlRow(XSSFSheet sheet, int rowIdx, XSSFCellStyle style, String... values) {
+        XSSFRow row = sheet.createRow(rowIdx);
+        for (int i = 0; i < values.length; i++) {
+            XSSFCell cell = row.createCell(i);
+            cell.setCellValue(values[i]);
+            cell.setCellStyle(style);
+        }
+    }
+
+    private static void xlBlankRow(XSSFSheet sheet, int rowIdx, XSSFCellStyle style, int numCols) {
+        XSSFRow row = sheet.createRow(rowIdx);
+        for (int i = 0; i < numCols; i++) row.createCell(i).setCellStyle(style);
+    }
+
+    private static XSSFCellStyle xlStyle(XSSFWorkbook wb, int[] bg, int[] fg, boolean bold) {
+        XSSFCellStyle style = wb.createCellStyle();
+        if (bg != null) {
+            style.setFillForegroundColor(new XSSFColor(new byte[]{(byte)bg[0], (byte)bg[1], (byte)bg[2]}, null));
+            style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        }
+        XSSFFont font = wb.createFont();
+        if (fg != null) font.setColor(new XSSFColor(new byte[]{(byte)fg[0], (byte)fg[1], (byte)fg[2]}, null));
+        if (bold) font.setBold(true);
+        style.setFont(font);
+        return style;
     }
 
     /** Converts a 1-based column index to an Excel column letter (1→A, 26→Z, 27→AA, …). */
