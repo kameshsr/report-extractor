@@ -44,7 +44,7 @@ public class MultiDbCsvExporter {
     // CONFIGURATION — edit these values to match your databases and queries
     // -----------------------------------------------------------------------
 
-    private static final String DB_HOST = "jdbc:postgresql://172.31.13.251:5432";
+    private static final String DB_HOST = "jdbc:postgresql://172.31.1.5:5432";
     private static final String DB_USER = "postgres";
     private static final String DB_PASS = "DB_PASS_REDACTED";
 
@@ -77,9 +77,9 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-05-04 13:11:00.000"; 
-    private static final String START_TIME        = "2026-05-04 13:20:00.000"; // processing start 
-    private static final String change = "Restarted redis server";
+    private static final String UPLOAD_START_TIME = "2026-05-05 10:50:00.000"; 
+    private static final String START_TIME        = "2026-05-05 11:00:00.000"; // processing start 
+    private static final String change = "Added cache in keymanager ";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -720,17 +720,18 @@ public class MultiDbCsvExporter {
                     .build();
 
             List<List<Object>> rows = new ArrayList<>();
+            List<String> rowTypes = new ArrayList<>();
 
             String runTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-            rows.add(row("=== RUN: " + runTime + " ==="));
+            rows.add(row("=== RUN: " + runTime + " ===")); rowTypes.add("run_header");
 
             // Time info
-            rows.add(row("Upload Start Time", "Processing Start Time", "End Time", "Duration (End - Processing Start)"));
-            rows.add(row(UPLOAD_START_TIME, START_TIME, endTime, durationStr));
+            rows.add(row("Upload Start Time", "Processing Start Time", "End Time", "Duration (End - Processing Start)")); rowTypes.add("time_header");
+            rows.add(row(UPLOAD_START_TIME, START_TIME, endTime, durationStr)); rowTypes.add("time_values");
 
             // Notes (shown at top so it is visible immediately)
-            rows.add(row("Notes", change));
-            rows.add(row(""));
+            rows.add(row("Notes", change)); rowTypes.add("notes");
+            rows.add(row("")); rowTypes.add("blank");
 
             // Status counts
             List<Object> statusHeaders = new ArrayList<>();
@@ -743,9 +744,9 @@ public class MultiDbCsvExporter {
             }
             statusHeaders.add("TOTAL");
             statusValues.add(String.valueOf(total));
-            rows.add(statusHeaders);
-            rows.add(statusValues);
-            rows.add(row(""));
+            rows.add(statusHeaders); rowTypes.add("status_header");
+            rows.add(statusValues); rowTypes.add("status_values");
+            rows.add(row("")); rowTypes.add("blank");
 
             // Interval data header -- same columns as CSV
             List<Object> intervalHeader = new ArrayList<>();
@@ -755,7 +756,7 @@ public class MultiDbCsvExporter {
                 intervalHeader.add("source_db");
                 intervalHeader.addAll(dbColNames.get(i));
             }
-            rows.add(intervalHeader);
+            rows.add(intervalHeader); rowTypes.add("interval_header");
 
             // Interval data rows + accumulate per-column totals for TOTAL row
             int numCols = intervalHeader.size();
@@ -780,7 +781,7 @@ public class MultiDbCsvExporter {
                         for (int c = 0; c < colCount; c++) { dataRow.add(""); ci++; }
                     }
                 }
-                rows.add(dataRow);
+                rows.add(dataRow); rowTypes.add("data");
             }
 
             // TOTAL row -- computed sums; source_db columns blank
@@ -795,12 +796,12 @@ public class MultiDbCsvExporter {
                     totalRow.add(String.valueOf(colTotals[ci++]));
                 }
             }
-            rows.add(totalRow);
-            rows.add(row(""));
+            rows.add(totalRow); rowTypes.add("total");
+            rows.add(row("")); rowTypes.add("blank");
 
             // Error category summary
-            rows.add(row("=== Error Category Summary (FAILED + REPROCESS) ==="));
-            rows.add(row("trn_type_code", "trn_status_code", "trn_status_comment", "count_reg_ids"));
+            rows.add(row("=== Error Category Summary (FAILED + REPROCESS) ===")); rowTypes.add("error_section_header");
+            rows.add(row("trn_type_code", "trn_status_code", "trn_status_comment", "count_reg_ids")); rowTypes.add("error_col_header");
             Map<String, Long> countMap = new LinkedHashMap<>();
             for (List<String[]> group : List.of(failedDetails, reprocessDetails)) {
                 for (String[] r : group) {
@@ -817,18 +818,64 @@ public class MultiDbCsvExporter {
                     parts.length > 1 ? parts[1] : "",
                     parts.length > 2 ? parts[2] : "",
                     String.valueOf(entry.getValue())
-                ));
+                )); rowTypes.add("error_data");
             }
 
+            rows.add(row("")); rowTypes.add("blank"); // blank separator between runs
 
             int numRows = rows.size();
             sheetsInsertRows(sheets, numRows);
             sheetsWriteValues(sheets, rows);
+            sheetsApplyColors(sheets, rowTypes);
             System.out.println("Google Sheet updated: " + numRows + " rows inserted at top.");
 
         } catch (Exception e) {
             System.err.println("Google Sheet update failed: " + e.getMessage());
         }
+    }
+
+    private static void sheetsApplyColors(Sheets sheets, List<String> rowTypes) throws Exception {
+        List<Request> requests = new ArrayList<>();
+        Color white = color(1f, 1f, 1f);
+        for (int i = 0; i < rowTypes.size(); i++) {
+            switch (rowTypes.get(i)) {
+                case "run_header":           requests.add(colorRow(i, color(0.102f, 0.137f, 0.494f), white)); break; // dark navy
+                case "time_header":          requests.add(colorRow(i, color(0.084f, 0.396f, 0.753f), white)); break; // blue
+                case "time_values":          requests.add(colorRow(i, color(0.890f, 0.945f, 0.992f), null));  break; // light blue
+                case "notes":               requests.add(colorRow(i, color(1.0f,   0.972f, 0.882f), color(0.902f, 0.318f, 0.0f))); break; // amber bg, orange text
+                case "blank":               requests.add(colorRow(i, color(0.933f, 0.933f, 0.933f), null));  break; // light gray
+                case "status_header":       requests.add(colorRow(i, color(0.106f, 0.369f, 0.125f), white)); break; // dark green
+                case "status_values":       requests.add(colorRow(i, color(0.910f, 0.961f, 0.914f), null));  break; // light green
+                case "interval_header":     requests.add(colorRow(i, color(0.290f, 0.078f, 0.549f), white)); break; // purple
+                case "total":               requests.add(colorRow(i, color(0.902f, 0.400f, 0.0f),   white)); break; // dark orange
+                case "error_section_header":requests.add(colorRow(i, color(0.718f, 0.110f, 0.110f), white)); break; // dark red
+                case "error_col_header":    requests.add(colorRow(i, color(0.988f, 0.894f, 0.894f), null));  break; // light pink
+            }
+        }
+        if (!requests.isEmpty()) {
+            sheets.spreadsheets().batchUpdate(SPREADSHEET_ID,
+                    new BatchUpdateSpreadsheetRequest().setRequests(requests)).execute();
+        }
+    }
+
+    private static Request colorRow(int rowIndex, Color bgColor, Color fgColor) {
+        CellFormat format = new CellFormat().setBackgroundColor(bgColor);
+        if (fgColor != null) {
+            format.setTextFormat(new TextFormat().setForegroundColor(fgColor).setBold(true));
+        }
+        return new Request().setRepeatCell(new RepeatCellRequest()
+                .setRange(new GridRange()
+                        .setSheetId(0)
+                        .setStartRowIndex(rowIndex)
+                        .setEndRowIndex(rowIndex + 1)
+                        .setStartColumnIndex(0)
+                        .setEndColumnIndex(50))
+                .setCell(new CellData().setUserEnteredFormat(format))
+                .setFields("userEnteredFormat(backgroundColor,textFormat)"));
+    }
+
+    private static Color color(float r, float g, float b) {
+        return new Color().setRed(r).setGreen(g).setBlue(b);
     }
 
     private static void sheetsInsertRows(Sheets sheets, int count) throws Exception {
