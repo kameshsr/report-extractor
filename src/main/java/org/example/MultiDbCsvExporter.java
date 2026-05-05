@@ -44,9 +44,21 @@ public class MultiDbCsvExporter {
     // CONFIGURATION — edit these values to match your databases and queries
     // -----------------------------------------------------------------------
 
+    private static final Properties CONFIG = loadConfig();
+
+    private static Properties loadConfig() {
+        Properties p = new Properties();
+        try (FileInputStream fis = new FileInputStream("config.properties")) {
+            p.load(fis);
+        } catch (IOException e) {
+            throw new ExceptionInInitializerError("config.properties not found: " + e.getMessage());
+        }
+        return p;
+    }
+
     private static final String DB_HOST = "jdbc:postgresql://172.31.1.5:5432";
     private static final String DB_USER = "postgres";
-    private static final String DB_PASS = "DB_PASS_REDACTED";
+    private static final String DB_PASS = CONFIG.getProperty("db.password");
 
     /**
      * Set to false to skip a query/DB in this run.
@@ -687,11 +699,11 @@ public class MultiDbCsvExporter {
 
     private static String nvl(String s) { return s == null ? "" : s; }
 
-    private static final String SPREADSHEET_ID = "SPREADSHEET_ID_REDACTED";
-    private static final String CREDENTIALS_FILE = "credentials.json"; // service-account key in working dir
+    private static final String SPREADSHEET_ID   = CONFIG.getProperty("spreadsheet.id");
+    private static final String CREDENTIALS_FILE = "credentials.json";
 
-    private static final String SLACK_TOKEN   = "SLACK_TOKEN_REDACTED"; // Slack bot token
-    private static final String SLACK_CHANNEL = "C0ARYKTH1FX";     // channel ID (e.g. C0123456789)
+    private static final String SLACK_TOKEN   = CONFIG.getProperty("slack.token");
+    private static final String SLACK_CHANNEL = CONFIG.getProperty("slack.channel");
 
     /**
      * Inserts a summary block at the top of the Google Sheet on every run.

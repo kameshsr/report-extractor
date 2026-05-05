@@ -1,0 +1,10 @@
+credentials.json
+config.properties
+*.backup
+target/
+*.log
+*.csv
+*.zip
+*.txt
+.idea/
+report/
