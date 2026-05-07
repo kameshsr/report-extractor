@@ -19,6 +19,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.sql.*;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.net.ProxySelector;
@@ -92,9 +93,10 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-05-05 10:50:00.000"; 
-    private static final String START_TIME        = "2026-05-05 11:00:00.000"; // processing start 
-    private static final String change = "Added cache in keymanager ";
+    private static final String UPLOAD_START_TIME = "2026-05-07 10:50:00.000"; 
+    private static final String START_TIME        = "2026-05-07 10:50:00.000"; // processing start 
+    private static final String change = "Stopped idrepo traffic (credential requester job is running 2 hours once) " +
+            "and added logger in packet manager controller class";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -865,33 +867,35 @@ public class MultiDbCsvExporter {
 
             rows.add(row("")); rowTypes.add("blank"); // blank separator between runs
 
-            int numRows = rows.size();
-            sheetsInsertRows(sheets, numRows);
-            sheetsWriteValues(sheets, rows);
-            sheetsApplyColors(sheets, rowTypes);
-            System.out.println("Google Sheet updated: " + numRows + " rows inserted at top.");
+            String sheetTitle = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+            int sheetId  = getOrCreateDailySheet(sheets, sheetTitle);
+            int startRow = getNextEmptyRow(sheets, sheetTitle);
+            sheetsWriteValues(sheets, rows, sheetTitle, startRow);
+            sheetsApplyColors(sheets, rowTypes, sheetId, startRow);
+            System.out.println("Google Sheet updated: " + rows.size() + " rows appended to sheet '" + sheetTitle + "'.");
 
         } catch (Exception e) {
             System.err.println("Google Sheet update failed: " + e.getMessage());
         }
     }
 
-    private static void sheetsApplyColors(Sheets sheets, List<String> rowTypes) throws Exception {
+    private static void sheetsApplyColors(Sheets sheets, List<String> rowTypes,
+                                          int sheetId, int startRow) throws Exception {
         List<Request> requests = new ArrayList<>();
         Color white = color(1f, 1f, 1f);
         for (int i = 0; i < rowTypes.size(); i++) {
             switch (rowTypes.get(i)) {
-                case "run_header":           requests.add(colorRow(i, color(0.102f, 0.137f, 0.494f), white)); break; // dark navy
-                case "time_header":          requests.add(colorRow(i, color(0.084f, 0.396f, 0.753f), white)); break; // blue
-                case "time_values":          requests.add(colorRow(i, color(0.890f, 0.945f, 0.992f), null));  break; // light blue
-                case "notes":               requests.add(colorRow(i, color(1.0f,   0.972f, 0.882f), color(0.902f, 0.318f, 0.0f))); break; // amber bg, orange text
-                case "blank":               requests.add(colorRow(i, color(0.933f, 0.933f, 0.933f), null));  break; // light gray
-                case "status_header":       requests.add(colorRow(i, color(0.106f, 0.369f, 0.125f), white)); break; // dark green
-                case "status_values":       requests.add(colorRow(i, color(0.910f, 0.961f, 0.914f), null));  break; // light green
-                case "interval_header":     requests.add(colorRow(i, color(0.290f, 0.078f, 0.549f), white)); break; // purple
-                case "total":               requests.add(colorRow(i, color(0.902f, 0.400f, 0.0f),   white)); break; // dark orange
-                case "error_section_header":requests.add(colorRow(i, color(0.718f, 0.110f, 0.110f), white)); break; // dark red
-                case "error_col_header":    requests.add(colorRow(i, color(0.988f, 0.894f, 0.894f), null));  break; // light pink
+                case "run_header":           requests.add(colorRow(startRow + i, color(0.102f, 0.137f, 0.494f), white,  sheetId)); break;
+                case "time_header":          requests.add(colorRow(startRow + i, color(0.084f, 0.396f, 0.753f), white,  sheetId)); break;
+                case "time_values":          requests.add(colorRow(startRow + i, color(0.890f, 0.945f, 0.992f), null,   sheetId)); break;
+                case "notes":               requests.add(colorRow(startRow + i, color(1.0f,   0.972f, 0.882f), color(0.902f, 0.318f, 0.0f), sheetId)); break;
+                case "blank":               requests.add(colorRow(startRow + i, color(0.933f, 0.933f, 0.933f), null,   sheetId)); break;
+                case "status_header":       requests.add(colorRow(startRow + i, color(0.106f, 0.369f, 0.125f), white,  sheetId)); break;
+                case "status_values":       requests.add(colorRow(startRow + i, color(0.910f, 0.961f, 0.914f), null,   sheetId)); break;
+                case "interval_header":     requests.add(colorRow(startRow + i, color(0.290f, 0.078f, 0.549f), white,  sheetId)); break;
+                case "total":               requests.add(colorRow(startRow + i, color(0.902f, 0.400f, 0.0f),   white,  sheetId)); break;
+                case "error_section_header":requests.add(colorRow(startRow + i, color(0.718f, 0.110f, 0.110f), white,  sheetId)); break;
+                case "error_col_header":    requests.add(colorRow(startRow + i, color(0.988f, 0.894f, 0.894f), null,   sheetId)); break;
             }
         }
         if (!requests.isEmpty()) {
@@ -900,14 +904,14 @@ public class MultiDbCsvExporter {
         }
     }
 
-    private static Request colorRow(int rowIndex, Color bgColor, Color fgColor) {
+    private static Request colorRow(int rowIndex, Color bgColor, Color fgColor, int sheetId) {
         CellFormat format = new CellFormat().setBackgroundColor(bgColor);
         if (fgColor != null) {
             format.setTextFormat(new TextFormat().setForegroundColor(fgColor).setBold(true));
         }
         return new Request().setRepeatCell(new RepeatCellRequest()
                 .setRange(new GridRange()
-                        .setSheetId(0)
+                        .setSheetId(sheetId)
                         .setStartRowIndex(rowIndex)
                         .setEndRowIndex(rowIndex + 1)
                         .setStartColumnIndex(0)
@@ -920,24 +924,34 @@ public class MultiDbCsvExporter {
         return new Color().setRed(r).setGreen(g).setBlue(b);
     }
 
-    private static void sheetsInsertRows(Sheets sheets, int count) throws Exception {
-        InsertDimensionRequest insert = new InsertDimensionRequest()
-                .setRange(new DimensionRange()
-                        .setSheetId(0)
-                        .setDimension("ROWS")
-                        .setStartIndex(0)
-                        .setEndIndex(count))
-                .setInheritFromBefore(false);
-        sheets.spreadsheets().batchUpdate(SPREADSHEET_ID,
-                new BatchUpdateSpreadsheetRequest()
-                        .setRequests(Collections.singletonList(new Request().setInsertDimension(insert))))
+    private static int getOrCreateDailySheet(Sheets sheets, String title) throws Exception {
+        Spreadsheet spreadsheet = sheets.spreadsheets().get(SPREADSHEET_ID).execute();
+        for (Sheet sheet : spreadsheet.getSheets()) {
+            if (title.equals(sheet.getProperties().getTitle())) {
+                return sheet.getProperties().getSheetId();
+            }
+        }
+        BatchUpdateSpreadsheetResponse resp = sheets.spreadsheets().batchUpdate(SPREADSHEET_ID,
+                new BatchUpdateSpreadsheetRequest().setRequests(Collections.singletonList(
+                        new Request().setAddSheet(
+                                new AddSheetRequest().setProperties(new SheetProperties().setTitle(title))))))
                 .execute();
+        return resp.getReplies().get(0).getAddSheet().getProperties().getSheetId();
     }
 
-    private static void sheetsWriteValues(Sheets sheets, List<List<Object>> rows) throws Exception {
+    private static int getNextEmptyRow(Sheets sheets, String sheetTitle) throws Exception {
+        ValueRange resp = sheets.spreadsheets().values()
+                .get(SPREADSHEET_ID, "'" + sheetTitle + "'!A:A")
+                .execute();
+        List<List<Object>> values = resp.getValues();
+        return values == null ? 0 : values.size();
+    }
+
+    private static void sheetsWriteValues(Sheets sheets, List<List<Object>> rows,
+                                          String sheetTitle, int startRow) throws Exception {
         ValueRange body = new ValueRange().setValues(rows);
         sheets.spreadsheets().values()
-                .update(SPREADSHEET_ID, "Sheet1!A1", body)
+                .update(SPREADSHEET_ID, "'" + sheetTitle + "'!A" + (startRow + 1), body)
                 .setValueInputOption("RAW")
                 .execute();
     }
