@@ -93,10 +93,9 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-05-07 10:50:00.000"; 
-    private static final String START_TIME        = "2026-05-07 10:50:00.000"; // processing start 
-    private static final String change = "Stopped idrepo traffic (credential requester job is running 2 hours once) " +
-            "and added logger in packet manager controller class";
+    private static final String UPLOAD_START_TIME = "2026-05-11 10:10:00.000"; 
+    private static final String START_TIME        = "2026-05-11 10:20:00.000"; // processing start 
+    private static final String change = "Testing with 2 mb packet ";
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -286,7 +285,7 @@ public class MultiDbCsvExporter {
         Path reportDir = Paths.get(REPORT_DIR);
         String outputFile = args.length > 0
                 ? args[0]
-                : reportDir.resolve("10_min_report_" + timestamp + ".xlsx").toString();
+                : reportDir.resolve("10_min_report_" + timestamp + ".csv").toString();
 
         // Ensure report directory exists
         try {
@@ -401,12 +400,167 @@ public class MultiDbCsvExporter {
         }
 
         // Phase 2: write colored Excel report
-        writeExcel(outputFile, endTime, durationStr, statusCounts, failedDetails, reprocessDetails,
-                   dbColNames, dbData, allIntervals);
+        writeCsv(outputFile, endTime, durationStr, statusCounts, failedDetails, reprocessDetails,
+                dbColNames, dbData, allIntervals);
 
         // Write summary to Google Sheet (insert at top each run)
         writeToGoogleSheet(endTime, durationStr, statusCounts, failedDetails, reprocessDetails, dbColNames, dbData, allIntervals);
         uploadToSlack(outputFile);
+    }
+
+    private static void writeCsv(String outputFile, String endTime, String durationStr,
+                                 List<String[]> statusCounts, List<String[]> failedDetails, List<String[]> reprocessDetails,
+                                 List<List<String>> dbColNames, List<Map<String, String[]>> dbData,
+                                 Set<String> allIntervals) {
+
+        try (BufferedWriter writer = Files.newBufferedWriter(
+                Paths.get(outputFile),
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+
+            // Time section
+            writer.write(
+                    escapeCsv("Upload Start Time") + "," +
+                            escapeCsv("Processing Start Time") + "," +
+                            escapeCsv("End Time") + "," +
+                            escapeCsv("Duration (End - Processing Start)")
+            );
+            writer.newLine();
+
+            writer.write(
+                    escapeCsv(UPLOAD_START_TIME) + "," +
+                            escapeCsv(START_TIME) + "," +
+                            escapeCsv(endTime) + "," +
+                            escapeCsv(durationStr)
+            );
+            writer.newLine();
+            writer.newLine();
+
+            // Notes
+            writer.write(escapeCsv("Notes") + "," + escapeCsv(change));
+            writer.newLine();
+            writer.newLine();
+
+            // Status counts
+            long totalStat = 0;
+
+            for (int i = 0; i < statusCounts.size(); i++) {
+                writer.write(escapeCsv(statusCounts.get(i)[0]));
+                if (i < statusCounts.size() - 1) writer.write(",");
+                try {
+                    totalStat += Long.parseLong(statusCounts.get(i)[1]);
+                } catch (Exception ignored) {}
+            }
+
+            writer.write("," + escapeCsv("TOTAL"));
+            writer.newLine();
+
+            for (int i = 0; i < statusCounts.size(); i++) {
+                writer.write(escapeCsv(statusCounts.get(i)[1]));
+                if (i < statusCounts.size() - 1) writer.write(",");
+            }
+
+            writer.write("," + escapeCsv(String.valueOf(totalStat)));
+            writer.newLine();
+            writer.newLine();
+
+            // Header row
+            List<String> headers = new ArrayList<>();
+            headers.add("interval_start");
+
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+                if (!ENABLED_QUERIES[i]) continue;
+
+                headers.add("source_db");
+                headers.addAll(dbColNames.get(i));
+            }
+
+            writer.write(String.join(",",
+                    headers.stream().map(MultiDbCsvExporter::escapeCsv).toList()));
+            writer.newLine();
+
+            // Totals
+            long[] totals = new long[headers.size()];
+
+            // Data rows
+            for (String interval : allIntervals) {
+
+                List<String> row = new ArrayList<>();
+                row.add(interval);
+
+                int totalIndex = 1;
+
+                for (int i = 0; i < DB_CONFIGS.length; i++) {
+
+                    if (!ENABLED_QUERIES[i]) continue;
+
+                    row.add(DB_CONFIGS[i][3]);
+                    totalIndex++;
+
+                    String[] vals = dbData.get(i).get(interval);
+
+                    int colCount = dbColNames.get(i).size();
+
+                    if (vals != null) {
+
+                        for (String v : vals) {
+
+                            row.add(v == null ? "" : v);
+
+                            try {
+                                totals[totalIndex] += Long.parseLong(v);
+                            } catch (Exception ignored) {}
+
+                            totalIndex++;
+                        }
+
+                    } else {
+
+                        for (int c = 0; c < colCount; c++) {
+                            row.add("");
+                            totalIndex++;
+                        }
+                    }
+                }
+
+                writer.write(String.join(",",
+                        row.stream().map(MultiDbCsvExporter::escapeCsv).toList()));
+
+                writer.newLine();
+            }
+
+            // TOTAL row
+            List<String> totalRow = new ArrayList<>();
+            totalRow.add("TOTAL");
+
+            int idx = 1;
+
+            for (int i = 0; i < DB_CONFIGS.length; i++) {
+
+                if (!ENABLED_QUERIES[i]) continue;
+
+                totalRow.add("");
+                idx++;
+
+                for (int j = 0; j < dbColNames.get(i).size(); j++) {
+                    totalRow.add(String.valueOf(totals[idx++]));
+                }
+            }
+
+            writer.write(String.join(",",
+                    totalRow.stream().map(MultiDbCsvExporter::escapeCsv).toList()));
+
+            writer.newLine();
+
+            // Error summary
+            writeErrorSummary(writer, failedDetails, reprocessDetails);
+
+            System.out.println("CSV export complete: " +
+                    Paths.get(outputFile).toAbsolutePath());
+
+        } catch (Exception e) {
+            System.err.println("Failed to write CSV: " + e.getMessage());
+        }
     }
 
     /** Queries DB1 for status_code counts in regprc.registration since uploadStartTime. */
