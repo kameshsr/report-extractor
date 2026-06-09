@@ -60,7 +60,7 @@ public class MultiDbCsvExporter {
         return p;
     }
 
-    private static final String DB_HOST = "jdbc:postgresql://172.31.1.5:5432";
+    private static final String DB_HOST = "jdbc:postgresql://172.31.1.234:5432";
     private static final String DB_USER = "postgres";
     private static final String DB_PASS = CONFIG.getProperty("db.password");
 
@@ -93,9 +93,9 @@ public class MultiDbCsvExporter {
     // -----------------------------------------------------------------------
     // TIME RANGE — UPLOAD_START_TIME and START_TIME are fixed; endTime is fetched at runtime from DB1
     // -----------------------------------------------------------------------
-    private static final String UPLOAD_START_TIME = "2026-05-11 10:10:00.000"; 
-    private static final String START_TIME        = "2026-05-11 10:20:00.000"; // processing start 
-    private static final String change = "Testing with 2 mb packet ";
+    private static final String UPLOAD_START_TIME = "2026-05-20 14:40:00.000"; 
+    private static final String START_TIME        = "2026-05-29 10:10:00.000"; // processing start 
+   private static final String change = "clamv 5 pods with 4200 m and 1500 mi with 2 MB packet"; ;
     // -----------------------------------------------------------------------
 
     /** One SQL query per database (index matches DB_CONFIGS above). */
@@ -275,7 +275,7 @@ public class MultiDbCsvExporter {
     }
 
     /** Folder where all CSV reports are written. */
-    private static final String REPORT_DIR = "report";
+    private static final String REPORT_DIR = "dsl";
 
     // -----------------------------------------------------------------------
 
@@ -311,8 +311,8 @@ public class MultiDbCsvExporter {
             return;
         }
 
-//        String endTime = "2026-04-28 11:10:00.000";
-        String endTime = fetchEndTime();
+       String endTime = "2026-05-20 19:50:00.000";
+        //String endTime = fetchEndTime();
         if (endTime == null) {
             System.err.println("Could not determine END_TIME from DB1 — aborting.");
             return;

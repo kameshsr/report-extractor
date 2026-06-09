@@ -18,9 +18,9 @@ import java.util.regex.Matcher;
  *   java QueryExecutorCategorize [inputFile] [perRegOutput] [categoriesOutput]
  *
  * Defaults:
- *   inputFile = output.txt
- *   perRegOutput = query_results.txt
- *   categoriesOutput = categories.txt
+ *   inputFile = dsl/output.txt
+ *   perRegOutput = dsl/query_results.txt
+ *   categoriesOutput = dsl/categories.txt
  *
  * Behavior additions:
  * - Extracts an S-number from the original input line (pattern `_S123_` or `_S123`).
@@ -29,9 +29,9 @@ import java.util.regex.Matcher;
 public class QueryExecutor {
 
     // ----------------- Edit DB details here if needed -----------------
-    private static final String DB_URL = "jdbc:postgresql://dev01.mosip.net:5433/mosip_regprc";
+    private static final String DB_URL = "jdbc:postgresql://qaj21.mosip.net:5433/mosip_regprc";
     private static final String DB_USER = "postgres";
-    private static final String DB_PASS = "L$@5P^b5vr7!8DsH";
+    private static final String DB_PASS = "A__Sj7u8hPhJ71-.";
     // ------------------------------------------------------------------
 
     // Normalization patterns
@@ -80,10 +80,25 @@ public class QueryExecutor {
 
 
     public static void main(String[] args) {
+        // Clear dsl folder before every run
+        try {
+            Path dslDir = Paths.get("dsl");
+            if (Files.exists(dslDir)) {
+                try (java.util.stream.Stream<Path> files = Files.walk(dslDir)) {
+                    files.filter(p -> !p.equals(dslDir))
+                         .sorted(java.util.Comparator.reverseOrder())
+                         .forEach(p -> { try { Files.delete(p); } catch (IOException ex) { /* ignore */ } });
+                }
+            }
+            Files.createDirectories(dslDir);
+        } catch (IOException e) {
+            System.err.println("Could not clear dsl folder: " + e.getMessage());
+        }
+
         query();
-        String inputFile = args.length > 0 ? args[0] : "output.txt";
-        String perRegOutputFile = args.length > 1 ? args[1] : "query_results.txt";
-        String categoriesFile = args.length > 2 ? args[2] : "categories.txt";
+        String inputFile = args.length > 0 ? args[0] : "dsl/output.txt";
+        String perRegOutputFile = args.length > 1 ? args[1] : "dsl/query_results.txt";
+        String categoriesFile = args.length > 2 ? args[2] : "dsl/categories.txt";
 
         // Load driver
         try {
@@ -105,18 +120,43 @@ public class QueryExecutor {
             return;
         }
 
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(inputPath);
+        } catch (IOException e) {
+            System.err.println("Failed to read input file: " + e.getMessage());
+            return;
+        }
+
+        // For each suffix (e.g. /api-internal.qaj21_S102_context), keep only the latest reg_id.
+        // reg_ids contain an embedded timestamp so lexicographic max picks the latest.
+        Map<String, String> latestRegIdBySuffix = new LinkedHashMap<>();
+        for (String rawLine : lines) {
+            if (rawLine == null) continue;
+            String line = rawLine.trim();
+            if (line.isEmpty()) continue;
+            String regId = line.split("/api")[0].trim();
+            String suffix = line.substring(regId.length()); // e.g. /api-internal.qaj21_S102_context
+            latestRegIdBySuffix.merge(suffix, regId, (existing, next) ->
+                    next.compareTo(existing) > 0 ? next : existing);
+        }
+
         try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASS);
              BufferedWriter regWriter = Files.newBufferedWriter(Paths.get(perRegOutputFile),
                      StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-
-            List<String> lines = Files.readAllLines(inputPath);
 
             // SQL: adjust LIMIT if you want more rows per reg_id
             String sql = "SELECT trn_type_code, status_code, status_comment " +
                     "FROM regprc.registration_transaction " +
                     "WHERE reg_id = ? ORDER BY cr_dtimes DESC LIMIT 200";
 
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            // SQL for categories grouping — top 2 rows only
+            String catSql = "SELECT rt.trn_type_code, rt.status_code, rt.status_comment " +
+                    "FROM regprc.registration_transaction AS rt " +
+                    "WHERE rt.reg_id = ? ORDER BY rt.cr_dtimes DESC LIMIT 2";
+
+            try (PreparedStatement stmt = conn.prepareStatement(sql);
+                 PreparedStatement catStmt = conn.prepareStatement(catSql)) {
                 for (String rawLine : lines) {
                     if (rawLine == null) continue;
                     String originalLine = rawLine;
@@ -125,6 +165,7 @@ public class QueryExecutor {
 
                     // Extract reg_id (before /api)
                     String regId = line.split("/api")[0].trim();
+                    String suffix = line.substring(regId.length());
 
                     // Extract S-number (if any) from the original line and form regWithS
                     String sNum = extractSNumber(originalLine);
@@ -174,10 +215,23 @@ public class QueryExecutor {
                     }
                     regWriter.newLine();
 
-                    // Build order-insensitive signature (based on the DB rows)
-                    String signature = buildSignatureOrderInsensitive(rows);
+                    // Build order-insensitive signature using top-2 rows for categories grouping.
+                    // Skip older duplicates — only the latest reg_id per suffix goes into categories.
+                    if (!regId.equals(latestRegIdBySuffix.get(suffix))) continue;
+
+                    List<RowData> catRows = new ArrayList<>();
+                    catStmt.setString(1, regId);
+                    try (ResultSet catRs = catStmt.executeQuery()) {
+                        while (catRs.next()) {
+                            catRows.add(new RowData(
+                                    nullSafe(catRs.getString("trn_type_code")),
+                                    nullSafe(catRs.getString("status_code")),
+                                    nullSafe(catRs.getString("status_comment"))));
+                        }
+                    }
+                    String signature = buildSignatureOrderInsensitive(catRows);
                     signatureToRegIds.computeIfAbsent(signature, k -> new ArrayList<>()).add(regWithS);
-                    signatureToCanonical.putIfAbsent(signature, buildCanonicalDescriptionOrderInsensitive(rows));
+                    signatureToCanonical.putIfAbsent(signature, buildCanonicalDescriptionOrderInsensitive(catRows));
                 }
             }
 
@@ -211,13 +265,13 @@ public class QueryExecutor {
                 catWriter.write("Canonical: " + canonical);
                 catWriter.newLine();
 
-                catWriter.write("Sample reg_ids: ");
-                for (int i = 0; i < Math.min(10, regIds.size()); i++) {
+                catWriter.write("reg_ids (" + regIds.size() + "): ");
+                for (int i = 0; i < regIds.size(); i++) {
                     if (i > 0) catWriter.write(", ");
                     catWriter.write(regIds.get(i));
                 }
                 catWriter.newLine();
-                catWriter.write("All reg_ids count: " + regIds.size());
+                catWriter.write("Count: " + regIds.size());
                 catWriter.newLine();
                 catWriter.write("------------------------------------------------------------");
                 catWriter.newLine();
@@ -228,9 +282,32 @@ public class QueryExecutor {
             catWriter.newLine();
 
             System.out.println("Categories written to " + Paths.get(categoriesFile).toAbsolutePath());
-            System.out.println("Per-reg results written to " + Paths.get("query_results.txt").toAbsolutePath());
+            System.out.println("Per-reg results written to " + Paths.get(perRegOutputFile).toAbsolutePath());
         } catch (IOException ex) {
             System.err.println("Failed to write categories file:");
+            ex.printStackTrace();
+        }
+
+        // Write Scenarios.txt — scenario numbers extracted from all reg_ids in categories
+        String scenariosFile = "dsl/Scenarios.txt";
+        try (BufferedWriter scWriter = Files.newBufferedWriter(Paths.get(scenariosFile),
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+
+            // Collect scenario numbers in insertion order, deduped
+            Set<String> seen = new LinkedHashSet<>();
+            for (List<String> regIds : signatureToRegIds.values()) {
+                for (String regWithS : regIds) {
+                    String[] parts = regWithS.split("_");
+                    if (parts.length >= 2) seen.add(parts[1]);
+                }
+            }
+
+            scWriter.write(String.join(",", seen));
+            scWriter.newLine();
+
+            System.out.println("Scenarios written to " + Paths.get(scenariosFile).toAbsolutePath());
+        } catch (IOException ex) {
+            System.err.println("Failed to write scenarios file:");
             ex.printStackTrace();
         }
     }
@@ -341,12 +418,12 @@ public class QueryExecutor {
     public static void query() {
         // Input file and output file
 //        String inputFile = "";
-        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\automation_report\\DSL-api-internal.dev01-full-run-1776186427878-report_T-209_P-112_KI-30_I-0_S-16_F-51.html"; // Corrected path
-        String outputFile = "output.txt";   // output file
+        String inputFile = "C:\\Users\\kames\\Downloads\\mosip\\automation_report\\DSL-api-internal.qaj21-full-error-1780880730781-report_T-230_P-175_S-0_F-27.html"; // Corrected path
+        String outputFile = "dsl/output.txt";   // output file
 
         // Regex: capture value after /status/ ... until ) 
         String urlPattern =
-                "End Point URL: http://packetcreator.packetcreator:80/v1/packetcreator/resident/status/([^/]+/api-internal\\.dev01_S\\d+_context)\\)";
+                "End Point URL: http://packetcreator.packetcreator:80/v1/packetcreator/resident/status/([^/]+/api-internal\\.qaj21_S\\d+_context)\\)";
         Pattern pattern = Pattern.compile(urlPattern);
 
         try {
@@ -361,8 +438,9 @@ public class QueryExecutor {
                     if (matcher.find()) {
                         String extractedValue = matcher.group(1);
 
-                        // Write to output.txt
+                        // Write to dsl/output.txt
                         Path outputPath = Paths.get(outputFile).toAbsolutePath();
+                        Files.createDirectories(outputPath.getParent());
                         try (BufferedWriter writer = Files.newBufferedWriter(outputPath,
                                 StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
                             writer.write(extractedValue);

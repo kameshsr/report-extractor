@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -38,7 +40,7 @@ public class ApiResponseMonitor {
             "https://api-internal.qa21.mosip.net/v1/mock-abis-service/config/expectation";
 
     private static final int    POLL_INTERVAL_MS = 1000;
-    private static final String CHANGE_LOG_FILE  = "api_response_changes.log";
+    private static final String CHANGE_LOG_FILE  = "dsl/api_response_changes.log";
     private static final DateTimeFormatter TS_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
@@ -175,6 +177,7 @@ public class ApiResponseMonitor {
     }
 
     private static void setupLogger() throws IOException {
+        Files.createDirectories(Paths.get("dsl"));
         logger.setUseParentHandlers(false);
 
         Formatter fmt = new Formatter() {
@@ -193,7 +196,7 @@ public class ApiResponseMonitor {
         logger.addHandler(ch);
 
         // Rolling file — up to 10 MB, 5 files
-        FileHandler fh = new FileHandler("api_monitor_%g.log", 10 * 1024 * 1024, 5, true);
+        FileHandler fh = new FileHandler("dsl/api_monitor_%g.log", 10 * 1024 * 1024, 5, true);
         fh.setFormatter(fmt);
         fh.setLevel(Level.ALL);
         logger.addHandler(fh);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 compare_all_files_to_excel.py
 
 Compare two directories recursively and produce an Excel report.
@@ -12,7 +12,8 @@ python compare_all_files_to_excel.py \
   --old "C:\path\to\old" \
   --new "C:\path\to\new" \
   --output "C:\path\to\diff.xlsx"
-  python compare_props_to_excel.py --old "C:\Users\kames\Downloads\mosip\mosip-config-release-1.3.x\mosip-config-release-1.3.x" --new "C:\Users\kames\Downloads\mosip\mosip-config-devupgrade\mosip-config-devupgrade" --output "C:\Users\kames\Downloads\mosip\diff.xlsx"
+  python compare_props_to_excel.py --old "C:\Users\kames\Downloads\mosip\config\mosip-config-collab1\mosip-config-collab1" --new "C:\Users\kames\Downloads\mosip\config\mosip-config-1.2.4.2\mosip-config-1.2.4.2" --output "C:\Users\kames\Downloads\mosip\diff.xlsx"
+C:\Users\kames\IdeaProjects\report-extractor1>python compare_props_to_excel.py --old "C:/Users/kames/Downloads/mosip/automation_report/mosip-config-collab1/mosip-config-collab1" --new "C:/Users/kames/Downloads/mosip/automation_report/mosip-config-1.3.0/mosip-config-1.3.0" --output "C:/Users/kames/Downloads/mosip/diff.xlsx"
 """
 import argparse
 from pathlib import Path
